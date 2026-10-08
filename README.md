@@ -100,6 +100,12 @@ node --test tests/test_extension.mjs tests/test_background.mjs
 
 Python 3.10+ is required. Node is only needed for developer tests. Native messaging pins the extension origin and allows specific setup/review commands, not arbitrary commands or paths to open. The source package contains no API secrets.
 
+## Request overhead
+
+Review requests use compact JSON, retain exact evidence text, and reference existing section outlines during verification instead of repeating their titles and locations. Draft and verification turns omit function definitions because those turns cannot call tools. Retrieval tools, the separate evidence/applicability verification, citation validation, model, and output format remain in place.
+
+Run `python scripts/benchmark_requests.py` for an offline synthetic review with bundled procedures and a mocked gateway. The same fixture before and after these changes used 28 calls and produced all 13 review areas. Estimated input fell from 1,346,844 to 1,264,267 tokens (6.1%); serialized request bytes fell 6.3%. These are conservative local estimates, not billed tokens or a live quality/latency comparison. Gateway wait time and output generation remain; this change does not establish a measured end-to-end speedup.
+
 ## References
 
 The Production endpoint, Bearer header and reduced Responses envelope come from the user's MDT-GPT screenshots dated September 30, 2026. The exact model ID is the user's reported working ID; public OpenAI model names or limits do not establish its internal deployment properties.

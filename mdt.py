@@ -1,10 +1,3 @@
-"""MDT-GPT Production OpenAI Responses adapter.
-
-The review engine has a provider-neutral text/tool-result contract. Only this
-adapter translates it to Responses inputs and output items. The MDT gateway
-screenshots document a reduced output envelope; explicit statuses are always
-honored when present. No request uses an Anthropic, Development or public host.
-"""
 from copy import deepcopy
 import json
 import re
@@ -13,11 +6,8 @@ import ssl
 import urllib.error
 import urllib.request
 from uuid import uuid4
-
 from config import ENVIRONMENT, ENDPOINT, DEFAULT_AUTH, DEFAULT_MODEL
 from context_budget import input_estimate, fits_context
-
-
 class ProviderError(Exception):
     def __init__(self, message, *, status=None, field=None, unsupported_format=False,
                  unsupported_tools=False, stop_reason=None, output_limit=None):
@@ -25,13 +15,9 @@ class ProviderError(Exception):
         self.status, self.field = status, field
         self.unsupported_format, self.unsupported_tools = unsupported_format, unsupported_tools
         self.stop_reason, self.output_limit = stop_reason, output_limit
-
-
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None  # Never forward credentials to a redirected destination.
-
-
 def error_description(raw):
     try:
         value = json.loads(raw)
@@ -55,8 +41,6 @@ def error_description(raw):
                 visit(part, depth+1)
     visit(value)
     return ' '.join(found)[:8000]
-
-
 def classify_error(description):
     text = description.lower()
     unsupported = any(v in text for v in ['not supported', 'does not support', 'unsupported', 'unknown parameter',
@@ -71,8 +55,6 @@ def classify_error(description):
     if 'model' in text:
         return 'model', False
     return None, False
-
-
 def safe_diagnostic(description, token):
     value = description.replace(token, '[credential removed]') if token else description
     value = re.sub(r'(?i)bearer\s+[^\s,;"\]}]+', 'Bearer [credential removed]', value)
@@ -82,8 +64,6 @@ def safe_diagnostic(description, token):
     value = re.sub(r'https?://[^\s<>"\]]+', '[URL omitted]', value)
     value = re.sub(r'[\x00-\x1f\x7f]', ' ', value)
     return ' '.join(value.split())[:420]
-
-
 def network_error(exc):
     reason = getattr(exc, 'reason', exc)
     if isinstance(reason, ssl.SSLCertVerificationError):
@@ -97,10 +77,7 @@ def network_error(exc):
     else:
         detail = 'A network connection could not be established. Ask IT to check Zscaler and proxy access.'
     return ProviderError('Could not reach MDT-GPT Production (api.gpt.medtronic.com:443). '+detail)
-
-
 def response_input(messages, portable=False):
-    """Replay complete Responses output (including reasoning) before tool results."""
     result = []
     for message in messages:
         role, content = message['role'], message['content']
@@ -127,8 +104,6 @@ def response_input(messages, portable=False):
             else:
                 raise ProviderError('Unsupported internal conversation item. No request was sent.')
     return result
-
-
 class MDTClient:
     def __init__(self, token, model=DEFAULT_MODEL, auth_style=DEFAULT_AUTH, transport=None, *, environment=ENVIRONMENT):
         if not isinstance(token,str) or not token.strip() or '\n' in token or '\r' in token:
@@ -145,10 +120,8 @@ class MDTClient:
         self.structured_mode, self.tool_mode = 'auto', 'native'
         self.estimate_scale, self.context_usage = 1.0, []
         self.reported_models = set()
-
     def headers(self):
         return {'Content-Type':'application/json','Authorization':'Bearer '+self.token}
-
     def _payload(self, system, messages, tools, schema, max_tokens, compatibility=False):
         if not isinstance(system,str):
             raise ProviderError('System instructions must be text.')
@@ -163,15 +136,14 @@ class MDTClient:
                        'requests and sends back tool_result items. Allowed tools:\n'+json.dumps(tools,ensure_ascii=False))
         payload = {'model':self.model,'input':[{'role':'system','content':system},*response_input(messages,portable)],
                    'max_output_tokens':max_tokens,'store':False}
-        if tools and not portable:
+        if tools and not portable and not schema:
             payload['tools'] = [{'type':'function','name':t['name'],'description':t.get('description',''),
                                  'parameters':output_schema(t['input_schema']),'strict':True} for t in tools]
-            payload['tool_choice'] = 'none' if schema else 'auto'
+            payload['tool_choice'] = 'auto'
             payload['include'] = ['reasoning.encrypted_content']
         if schema and not compatibility:
             payload['text'] = {'format':{'type':'json_schema','name':'gch_review','strict':True,'schema':output_schema(schema)}}
         return payload
-
     def _http_error(self, exc, diagnostic):
         try:
             description = error_description(exc.read(65536))
@@ -202,13 +174,11 @@ class MDTClient:
             stop_reason='input_context_budget' if context_error else None,
             unsupported_format=exc.code in {400,422} and field=='text.format' and unsupported,
             unsupported_tools=exc.code in {400,422} and field in {'tools','tool_choice','include'} and unsupported)
-
     def _normalize(self, response, payload):
         if not isinstance(response,dict) or not isinstance(response.get('output'),list):
             raise ProviderError('MDT-GPT did not return an OpenAI Responses result.')
         usage = response.get('usage') or {}
         usage = usage if isinstance(usage,dict) else {}
-        # MDT's documented envelope uses prompt/completion; native Responses uses input/output.
         counts = {k:usage.get(k,usage.get(alias,0)) for k,alias in
                   [('input_tokens','prompt_tokens'),('output_tokens','completion_tokens')]}
         counts = {k:v if type(v)==int and v>=0 else 0 for k,v in counts.items()}
@@ -216,8 +186,6 @@ class MDTClient:
         if counts['input_tokens']:
             self.estimate_scale = max(self.estimate_scale,counts['input_tokens']/max(1,input_estimate(payload))*1.15)
         self.context_usage[-1]['reported_input'] = counts['input_tokens']
-        # The fixed request ID can be a gateway routing alias. Treat the returned
-        # model as deployment metadata, not a request to change the next model.
         reported_model = response.get('model')
         if reported_model is not None:
             if (not isinstance(reported_model,str) or
@@ -269,11 +237,9 @@ class MDTClient:
         if not content:
             raise ProviderError('MDT-GPT returned no usable text or retrieval calls. No report was accepted.')
         if len(ids)>8:raise ProviderError('The model requested too many tool calls in one turn.',stop_reason='too_many_tool_calls')
-        # Replay raw output only inside the next Responses request, never in Word/status.
         content.append({'type':'responses_output','items':deepcopy(response['output'])})
         return {'content':content,'model':reported_model or self.model,'requested_model':self.model,
                 'reported_model':reported_model,'stop_reason':'tool_use' if ids else 'end_turn','usage':counts}
-
     def _send(self, payload, diagnostic=False):
         encoded=json.dumps(payload,ensure_ascii=False).encode('utf-8')
         if len(encoded)>4*1024*1024:
@@ -299,7 +265,6 @@ class MDTClient:
         self.context_usage.append({'input_budget':input_tokens,'method':'estimated','reported_input':0,
                                    'output_limit':payload['max_output_tokens']})
         return self._normalize(response,payload)
-
     def message(self, system, messages, tools=None, schema=None, max_tokens=6000, diagnostic=False):
         for _ in range(3):  # At most one explicit format fallback and one tool fallback.
             compatibility=self.structured_mode=='validated_json'
@@ -331,10 +296,7 @@ class MDTClient:
                     raise ProviderError('The model returned an invalid retrieval plan. No report was accepted.') from None
             return response
         raise ProviderError('The gateway compatibility checks did not finish. No report was accepted.')
-
-
 def probe_connection(client, discover=False):
-    """Synthetic text and JSON probes. No model discovery or complaint data."""
     system='Connection test. No complaint documents are involved.'
     try:
         basic=client.message(system,[{'role':'user','content':'Reply with OK.'}],max_tokens=4096,diagnostic=True)
@@ -351,8 +313,6 @@ def probe_connection(client, discover=False):
     except (ValueError,TypeError):valid=False
     if not valid:raise ProviderError('The token and model connected, but the JSON response failed local validation. No complaint documents were sent.')
     return {'structured_mode':getattr(client,'structured_mode','native'),'model':client.model}
-
-
 def output_schema(schema):
     if isinstance(schema,dict):
         result={k:output_schema(v) for k,v in schema.items() if k not in
@@ -365,7 +325,5 @@ def output_schema(schema):
         return result
     if isinstance(schema,list):return [output_schema(v) for v in schema]
     return schema
-
-
 def response_text(response):
     return '\n'.join(c.get('text','') for c in response['content'] if isinstance(c,dict) and c.get('type')=='text')

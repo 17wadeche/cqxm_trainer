@@ -30,6 +30,12 @@ TOOLS = [
     {"name": "calendar_days_between", "description": "Compute end minus start in calendar days for two ISO dates. This does not choose a regulatory clock start, deadline, inclusive-counting rule, jurisdiction, or exception; those require the applicable cited procedure.",
      "input_schema": {"type": "object", "properties": {"start": {"type": "string"}, "end": {"type": "string"}}, "required": ["start", "end"], "additionalProperties": False}},
 ]
+def packet_json(value):
+    return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+def coverage_status(sections, sent):
+    return [{key: row[key] for key in
+             ('source_id', 'section_id', 'supplied_chunks', 'status')}
+            for row in coverage(sections, sent)]
 def unavailable(check, message):
     return Finding(check_id=check[0], record_element=check[1], what_was_done=message,
         record_evidence=[], procedure_references=[], assessment="not_assessable",
@@ -195,7 +201,7 @@ class ReviewEngine:
                 registry=staged;seeds.extend(value);sent.add(key)
         task['initial_evidence']=seeds
         task['calendar_comparisons']=index.calendar_comparisons(sent) if any(c[0]=='timing' for c in checks) else []
-        messages = [{"role": "user", "content": json.dumps(task, ensure_ascii=False)}]
+        messages = [{"role": "user", "content": packet_json(task)}]
         for round_number in range(6):
             if cancelled.is_set():
                 raise InterruptedError("Review cancelled")
@@ -222,12 +228,12 @@ class ReviewEngine:
                         excerpts,staged=registry.preview(fresh)
                         newly_sent={(r['source_id'],r['chunk_id']) for r in fresh}
                         value={'chunks':excerpts,'already_supplied':already,**meta}
-                    candidate={'type':'tool_result','tool_use_id':call['id'],'content':json.dumps(value,ensure_ascii=False)}
+                    candidate={'type':'tool_result','tool_use_id':call['id'],'content':packet_json(value)}
                     if not fits(messages+[{'role':'user','content':results+[candidate]}],reserve=8000):
                         value = {"limit": "This evidence packet is full. Requested evidence was NOT supplied. Name the unresolved source; do not infer absence or a gap."}
                     else:
                         registry=staged;sent.update(newly_sent)
-                    text = json.dumps(value, ensure_ascii=False)
+                    text = packet_json(value)
                     result = {"type": "tool_result", "tool_use_id": call['id'], "content": text}
                 except (ValueError, TypeError, KeyError):
                     result = {"type": "tool_result", "tool_use_id": call['id'], "content": "Invalid tool request. Use only known source and chunk IDs and the declared input schema.", "is_error": True}
@@ -255,15 +261,15 @@ class ReviewEngine:
                         raise ProviderError('The review could not be verified for '+checks[0][1]+' after two attempts. '+detail+'. No report was accepted.') from None
                     progress('Correcting the review response: '+issues[0]['code'])
                     messages.append({"role": "assistant", "content": answer['content']})
-                    messages.append({"role": "user", "content": json.dumps({'validation_errors':issues,
+                    messages.append({"role": "user", "content": packet_json({'validation_errors':issues,
                         'expected_check_ids':sub_evidence.expected_check_ids,
                         'instruction':'Correct the listed fields. Select only supplied evidence IDs. Do not invent evidence or change an assessment merely to avoid validation.'})})
             if phase=='draft':
                 progress('Checking the findings against the source evidence…')
                 messages.append({'role':'assistant','content':answer['content']})
-                messages.append({'role':'user','content':json.dumps({
+                messages.append({'role':'user','content':packet_json({
                     'phase':'evidence and applicability verification',
-                    'current_section_coverage':coverage(all_sections,sent),
+                    'current_section_coverage':coverage_status(all_sections,sent),
                     'calendar_comparisons':index.calendar_comparisons(sent) if any(c[0]=='timing' for c in checks) else [],
                     'instruction':
                         'Re-check every draft finding against the original supplied evidence and return the corrected final review using the same schema. '
