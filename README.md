@@ -80,6 +80,8 @@ The six supplied defaults load automatically: 027-P043 K, 027-WI185 R, 027-WI186
 
 ## Package and tests
 
+During a review, HTTP 503 errors and responses requesting more than eight tools in one turn automatically retry the current model turn after 30 seconds. Accepted evidence and completed review areas stay in place; rejected tool calls are not executed. Interrupted GCH downloads also wait 30 seconds, then resume the same file when possible or download that file again. Previously collected attachments are retained. The panel shows the wait and retry, and Cancel remains available. Each failure allows up to three retries, within the existing request budget and capture lease. Persistent errors, expired credentials and invalid evidence still require attention; automatic recovery does not resume after closing the helper or restarting Chrome.
+
 In the concise Word review, **Done properly** has a green check and blank **What the record shows** and **What to learn or check** cells. These items do not repeat as study priorities; complete findings and citations remain in the saved review/evidence files and optional detailed report.
 
 Incoming HTML documents that open in a related GCH content-server viewer are read from the rendered body, including visible email headers and correspondence, without requiring a Download button. Only a viewer opened during the current attachment selection is eligible. Empty or oversized body text is reported as a collection limitation. Images, hidden content and linked documents are not extracted. This path has synthetic browser/helper tests; live GCH validation is still required.

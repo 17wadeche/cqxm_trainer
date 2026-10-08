@@ -268,7 +268,7 @@ class MDTClient:
                 raise ProviderError('MDT-GPT returned an unsupported output item.')
         if not content:
             raise ProviderError('MDT-GPT returned no usable text or retrieval calls. No report was accepted.')
-        if len(ids)>8:raise ProviderError('The model requested too many tool calls in one turn.')
+        if len(ids)>8:raise ProviderError('The model requested too many tool calls in one turn.',stop_reason='too_many_tool_calls')
         # Replay raw output only inside the next Responses request, never in Word/status.
         content.append({'type':'responses_output','items':deepcopy(response['output'])})
         return {'content':content,'model':reported_model or self.model,'requested_model':self.model,
@@ -318,7 +318,8 @@ class MDTClient:
                     value=json.loads(response_text(response))
                     if not isinstance(value,dict) or set(value)!={'tool_calls','text'} or not isinstance(value['text'],str):raise ValueError()
                     calls=value['tool_calls']
-                    if not isinstance(calls,list) or len(calls)>8:raise ValueError()
+                    if not isinstance(calls,list):raise ValueError()
+                    if len(calls)>8:raise ProviderError('The model requested too many tool calls in one turn.',stop_reason='too_many_tool_calls')
                     allowed={t['name'] for t in tools}
                     content=[]
                     for call in calls:

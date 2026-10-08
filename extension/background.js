@@ -41,7 +41,48 @@ async function capture(){return(await chrome.storage.session.get('capture')).cap
 async function finishCapture(){
   const active=await capture();
   if(active)await native('capture_cancel',{capture_id:active.captureId}).catch(()=>{});
-  await chrome.storage.session.remove('capture');await chrome.alarms.clear('capture-expiry');
+  await chrome.storage.session.remove('capture');await chrome.alarms.clear('capture-expiry');await chrome.alarms.clear('download-retry');
+}
+async function scheduleDownloadRetry(active,item){
+  const current=await capture();
+  if(current?.captureId!==active.captureId||current.role!==active.role||current.currentAttachment?.started!==active.currentAttachment?.started||current.currentAttachment?.done||current.processing)return;
+  if(current.downloadRetry)return;
+  const attempts=(current.downloadRetries||0)+1;
+  if(attempts>3){await fail(current.tabId,new Error('The download still failed after three automatic retries. Please check your connection.'));return;}
+  current.downloadRetries=attempts;
+  current.downloadRetry={id:item.id??null,url:item.finalUrl||item.url,attachmentStarted:current.currentAttachment?.started??null};
+  await chrome.storage.session.set({capture:current});
+  await update(current.tabId,{message:`Download interrupted. Waiting 30 seconds before retrying (${attempts}/3). Your progress is saved…`});
+  await chrome.alarms.create('download-retry',{when:Date.now()+30000});
+}
+async function retryDownload(){
+  const active=await capture(),retry=active?.downloadRetry;if(!retry)return;
+  if((active.currentAttachment?.started??null)!==retry.attachmentStarted)return;
+  const ctx=await context(await chrome.tabs.get(active.tabId));
+  if((await capture())?.captureId!==active.captureId)return;
+  if(ctx.recordId!==active.recordId)throw new Error('The selected event changed while waiting to retry the download.');
+  active.downloadRetry=null;await chrome.storage.session.set({capture:active});
+  await update(active.tabId,{message:'Retrying the download…'});
+  try{
+    if(retry.id!==null){
+      const items=await chrome.downloads.search({id:retry.id});
+      if((await capture())?.captureId!==active.captureId)return;
+      if(items[0]?.state==='complete'){enqueue(items[0]);return;}
+      if(items[0]?.canResume){await chrome.downloads.resume(retry.id);return;}
+    }
+    if(!fromGCH({url:retry.url}))throw new Error('The file URL is outside GCH.');
+    if(retry.id!==null){
+      await chrome.downloads.cancel(retry.id).catch(()=>{});
+      if((await capture())?.captureId!==active.captureId)return;
+      active.attachmentDownloadIds=[...(active.attachmentDownloadIds||[]),retry.id];
+    }
+    active.downloadId=null;active.requestedDownload=true;
+    await chrome.storage.session.set({capture:active});
+    await chrome.downloads.download({url:retry.url,saveAs:false,conflictAction:'uniquify'});
+  }catch{
+    const current=await capture();
+    if(current?.captureId===active.captureId)await scheduleDownloadRetry(current,{id:current.downloadId,url:retry.url});
+  }
 }
 async function fail(tabId,error){
   const active=await capture();if(active?.tabId===tabId)await finishCapture();
@@ -152,15 +193,30 @@ async function collectAttachments(active){
       if(!row.downloadable){limits.push('Incoming attachment '+row.name.slice(0,180)+' has no unique download link.');continue;}
       const current=await capture();if(current?.captureId!==active.captureId)return false;
       await chrome.storage.session.set({capture:{...current,role:'attachment',downloadId:null,requestedDownload:false,processing:false,
-        currentAttachment:{name:row.name.slice(0,240),started:Date.now(),done:false,error:null}}});
+        downloadRetries:0,downloadRetry:null,currentAttachment:{name:row.name.slice(0,240),started:Date.now(),done:false,error:null}}});
       await update(active.tabId,{message:'Reading incoming file '+seen.size+'…'});
-      if(!await attachmentCommand(active,frame,'download',row.key))return false;
       let result=null;
-      for(let i=0;i<120;i++){
-        await collectHtmlAttachment();
-        const latest=await capture();if(latest?.captureId!==active.captureId)return false;
-        if(latest.currentAttachment?.done){result=latest.currentAttachment;break;}
-        await delay(250);
+      for(let attempt=0;attempt<=3&&!result;attempt++){
+        if(attempt){
+          await update(active.tabId,{message:`The incoming file did not arrive. Waiting 30 seconds before retrying (${attempt}/3). Your progress is saved…`});
+          for(let i=0;i<120;i++){
+            await delay(250);
+            const latest=await capture();if(latest?.captureId!==active.captureId)return false;
+            if(latest.currentAttachment?.done){result=latest.currentAttachment;break;}
+          }
+          if(result)break;
+        }
+        const pending=await capture();if(pending?.captureId!==active.captureId)return false;
+        if(attempt===0||(!pending.downloadRetry&&pending.downloadId===null&&!pending.requestedDownload)){
+          if(!await attachmentCommand(active,frame,'download',row.key))return false;
+        }
+        for(let i=0;i<1200;i++){
+          await collectHtmlAttachment();
+          const latest=await capture();if(latest?.captureId!==active.captureId)return false;
+          if(latest.currentAttachment?.done){result=latest.currentAttachment;break;}
+          if(i>=120&&!latest.downloadRetry&&latest.downloadId===null)break;
+          await delay(250);
+        }
       }
       if(!result)throw new Error('Incoming attachment '+row.name.slice(0,180)+' could not be downloaded or read from its HTML viewer. Try again after it finishes loading.');
       if(result.error)limits.push('Incoming attachment '+row.name.slice(0,180)+' could not be collected: '+result.error.slice(0,220));
@@ -175,7 +231,7 @@ async function collectAttachments(active){
   }
   if(frame&&seen.size===0)limits.push('Attachment section contained no text files; incoming information could not be compared.');
   const current=await capture();if(current?.captureId!==active.captureId)return false;
-  await chrome.storage.session.set({capture:{...current,role:'report',currentAttachment:null,downloadId:null,requestedDownload:false,processing:false,attachmentLimits:limits,reportStarted:Date.now()}});
+  await chrome.storage.session.set({capture:{...current,role:'report',currentAttachment:null,downloadId:null,requestedDownload:false,processing:false,downloadRetries:0,downloadRetry:null,attachmentLimits:limits,reportStarted:Date.now()}});
   return true;
 }
 function htmlAttachmentBody(expectedUrl){
@@ -263,7 +319,9 @@ async function consider(item){
     if(/\.[a-z0-9]{2,5}$/i.test(name)&&filename!==name)return;
     if(active.downloadId!==null&&active.downloadId!==item.id)throw new Error('More than one incoming file downloaded for the selected attachment.');
     active.downloadId=item.id;await chrome.storage.session.set({capture:active});
+    if(item.state==='interrupted'){await scheduleDownloadRetry(active,item);return;}
     if(item.state!=='complete')return;
+    active.downloadRetry=null;await chrome.alarms.clear('download-retry');
     active.processing=true;await chrome.storage.session.set({capture:active});
     let error=null;
     try{await native('capture_attachment',{capture_id:active.captureId,path:item.filename});}
@@ -277,12 +335,14 @@ async function consider(item){
   if(!(/\.(pdf|docx|txt)$/i.test(item.filename||'')||/pdf|wordprocessingml|text\/plain/i.test(item.mime||'')))return;
   if(active.downloadId!==null&&active.downloadId!==item.id){await fail(active.tabId,new Error('More than one report downloaded. Please finish other downloads and check this record again.'));return;}
   active.downloadId=item.id;await chrome.storage.session.set({capture:active});
+  if(item.state==='interrupted'){await scheduleDownloadRetry(active,item);return;}
   if(item.state!=='complete')return;
+  active.downloadRetry=null;await chrome.alarms.clear('download-retry');
   active.processing=true;await chrome.storage.session.set({capture:active});
   try{
     const job=await native('capture_complete',{capture_id:active.captureId,path:item.filename,attachment_limits:active.attachmentLimits||[]});
     if((await capture())?.captureId!==active.captureId){await native('cancel_job',{id:job.id});return;}
-    await chrome.storage.session.remove('capture');await chrome.alarms.clear('capture-expiry');
+    await chrome.storage.session.remove('capture');await chrome.alarms.clear('capture-expiry');await chrome.alarms.clear('download-retry');
     await update(active.tabId,{phase:'reviewing',jobId:job.id,progress:10,message:'Comparing your record with incoming information and procedures…'});
     void follow(active.tabId,job.id);
   }catch(error){await fail(active.tabId,error);}
@@ -291,15 +351,18 @@ function enqueue(item){downloadQueue=downloadQueue.then(()=>consider(item)).catc
 chrome.downloads.onCreated.addListener(enqueue);
 chrome.downloads.onChanged.addListener(change=>{
   if(change.state?.current==='complete')chrome.downloads.search({id:change.id}).then(items=>items[0]&&enqueue(items[0])).catch(()=>{});
-  if(change.state?.current==='interrupted')capture().then(active=>{if(active?.downloadId===change.id)void fail(active.tabId,new Error('GCH’s report download was interrupted. Try again.'));});
+  if(change.state?.current==='interrupted')chrome.downloads.search({id:change.id}).then(async items=>{
+    const active=await capture();if(active?.downloadId===change.id&&items[0])await scheduleDownloadRetry(active,items[0]);
+  }).catch(()=>{});
 });
 chrome.webRequest.onHeadersReceived.addListener(details=>{
   const contentType=details.responseHeaders?.find(h=>h.name.toLowerCase()==='content-type')?.value||'';
   const html=/^text\/html(?:;|$)/i.test(contentType)&&new URL(details.url).pathname.toLowerCase().startsWith('/sap/bc/contentserver/');
-  if(details.method!=='GET'||!['main_frame','sub_frame'].includes(details.type)||(!html&&!/^(application\/(pdf|vnd\.|msword|rtf)|text\/(plain|csv|rtf)|message\/rfc822)/i.test(contentType)))return;
+  const unavailable=details.statusCode===503;
+  if(details.method!=='GET'||!['main_frame','sub_frame'].includes(details.type)||(!unavailable&&!html&&!/^(application\/(pdf|vnd\.|msword|rtf)|text\/(plain|csv|rtf)|message\/rfc822)/i.test(contentType)))return;
   const requestCapture=capture();
   setTimeout(async()=>{
-    const active=await capture();if(!active||!['report','attachment'].includes(active.role)||active.currentAttachment?.done||active.downloadId!==null||active.requestedDownload||active.processing)return;
+    const active=await capture();if(!active||!['report','attachment'].includes(active.role)||active.currentAttachment?.done||active.downloadId!==null||active.requestedDownload||active.downloadRetry||active.processing)return;
     const original=await requestCapture;
     if(original?.captureId!==active.captureId||original.role!==active.role||original.currentAttachment?.started!==active.currentAttachment?.started)return;
     const tab=await chrome.tabs.get(details.tabId).catch(()=>null);
@@ -309,6 +372,7 @@ chrome.webRequest.onHeadersReceived.addListener(details=>{
     if(!related.includes(details.tabId)&&!(fresh&&(related.includes(tab?.openerTabId)||related.includes(nav.parent))))return;
     const latest=await capture();
     if(latest?.captureId!==active.captureId||latest.role!==active.role||latest.currentAttachment?.started!==active.currentAttachment?.started||latest.currentAttachment?.done||latest.downloadId!==null||latest.requestedDownload||latest.processing)return;
+    if(unavailable){await scheduleDownloadRetry(latest,{url:details.url});return;}
     if(html){
       if(active.role!=='attachment'||details.tabId===active.tabId||nav.at<active.currentAttachment.started)return;
       if(latest.currentAttachment.viewer&&latest.currentAttachment.viewer.url!==details.url){
@@ -327,7 +391,7 @@ chrome.webRequest.onHeadersReceived.addListener(details=>{
         }catch{} // A focus failure must not cancel an already requested download.
       }
     }
-    catch{await fail(active.tabId,new Error('GCH opened a viewer that could not download automatically. Use the viewer’s Download button, then try the check again.'));}
+    catch{await scheduleDownloadRetry(active,{url:details.url});}
   },800);
 },{urls:[GCH+'*']},['responseHeaders']);
 async function follow(tabId,jobId){
@@ -347,6 +411,7 @@ async function follow(tabId,jobId){
   finally{polling.delete(jobId);}
 }
 chrome.alarms.onAlarm.addListener(alarm=>{
+  if(alarm.name==='download-retry')downloadQueue=downloadQueue.then(retryDownload).catch(async error=>{const active=await capture();if(active)await fail(active.tabId,error);});
   if(alarm.name==='capture-expiry')capture().then(active=>{if(active)void fail(active.tabId,new Error('GCH did not download the report. If a print or save dialog is open, finish it and try again.'));});
 });
 chrome.runtime.onMessage.addListener((message,sender,sendResponse)=>{

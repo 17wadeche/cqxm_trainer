@@ -1,10 +1,8 @@
-"""Bounded retrieval/review loop with server-owned sources and Word output."""
 import json
 import threading
 from datetime import date, datetime, timezone
 from pathlib import Path
 from uuid import uuid4
-
 from config import (GROUPS, ROOT, VERSION, ENVIRONMENT, RETRIEVAL_OUTPUT_TOKENS, REVIEW_OUTPUT_TOKENS,
                     MAX_OUTPUT_TOKENS, MAX_CHECKS_PER_BATCH, MAX_REVIEW_REQUESTS, TARGET_INPUT_TOKENS)
 from ingest import source_from_bytes
@@ -16,8 +14,6 @@ from procedure_sections import ProcedureIndex, coverage
 from evidence_quality import validate_availability
 from context_budget import estimate_tokens
 from render_report import render
-
-
 TOOLS = [
     {"name":"read_procedure_section","description":"Read a governing procedure section or appendix from the supplied outline, with its complete table, conditions and continuation pages. Start at offset 0 and follow next_offset until null.",
      "input_schema":{"type":"object","properties":{"source_id":{"type":"string"},"section_id":{"type":"string"},"offset":{"type":"integer","minimum":0}},"required":["source_id","section_id","offset"],"additionalProperties":False}},
@@ -34,46 +30,55 @@ TOOLS = [
     {"name": "calendar_days_between", "description": "Compute end minus start in calendar days for two ISO dates. This does not choose a regulatory clock start, deadline, inclusive-counting rule, jurisdiction, or exception; those require the applicable cited procedure.",
      "input_schema": {"type": "object", "properties": {"start": {"type": "string"}, "end": {"type": "string"}}, "required": ["start", "end"], "additionalProperties": False}},
 ]
-
-
 def unavailable(check, message):
     return Finding(check_id=check[0], record_element=check[1], what_was_done=message,
         record_evidence=[], procedure_references=[], assessment="not_assessable",
         feedback="Supply the missing inputs and ask the trainer to confirm this check's scope and applicability.",
         priority="medium", study_action=message)
 
-
 class SplitEvidencePacket(Exception):
     """Split checks before any API call when their governing evidence won't fit."""
-
-
 class ReviewEngine:
     def __init__(self, repository, provider_factory=MDTClient):
         self.repo = repository
         self.provider_factory = provider_factory
         self.system = (ROOT / "review_prompt.md").read_text(encoding="utf-8") + "\nUse the retrieval tools to verify the supplied sources. Never claim to have reviewed the original visuals. Return one finding per expected check ID. Citation fields are arrays of supplied evidence IDs such as E0001; do not write quotes or source/chunk citation objects. The application inserts the exact stored excerpts. Do not include conversation or internal reasoning."
         self.retrieval_system = self.system + "\nCURRENT PHASE: gather evidence before writing the report. Defer all findings and report JSON until the final phase. Use the read-only retrieval tools to fill evidence gaps. When ready, return only READY. Do not draft findings or narrate your work in this phase."
-
     def _message(self, client, system, messages, progress, cancelled, budget, phase, *, tools=None, schema=None, max_tokens):
-        """Retry a cut-off response with more space; never reuse its partial content."""
         limit = min(max_tokens, MAX_OUTPUT_TOKENS)
-        for attempt in range(3):
+        length_retries = recovery_retries = 0
+        retry_system = system
+        while True:
             if cancelled.is_set():
                 raise InterruptedError("Review cancelled")
             if budget['remaining'] <= 0:
                 raise ProviderError('The review reached its request limit. No report was accepted. Ask your trainer to inspect the source scope.')
             budget['remaining'] -= 1
             try:
-                return client.message(system, messages, tools=tools, schema=schema, max_tokens=limit)
+                answer = client.message(retry_system, messages, tools=tools, schema=schema, max_tokens=limit)
+                if sum(c.get('type') == 'tool_use' for c in answer['content']) > 8:
+                    raise ProviderError('The model requested too many tool calls in one turn.',stop_reason='too_many_tool_calls')
+                return answer
             except ProviderError as exc:
+                if exc.status == 503 or exc.stop_reason == 'too_many_tool_calls':
+                    if recovery_retries >= 3 or budget['remaining'] <= 0:
+                        raise
+                    recovery_retries += 1
+                    if exc.stop_reason == 'too_many_tool_calls':
+                        retry_system = system + '\nRequest at most 8 read-only tool calls in this turn. Defer additional calls to later turns.'
+                    progress(f'Waiting 30 seconds before retrying {phase} ({recovery_retries}/3). Your progress is saved…')
+                    if cancelled.wait(30):
+                        raise InterruptedError('Review cancelled')
+                    progress(f'Retrying {phase}…')
+                    continue
                 if exc.stop_reason != 'max_tokens':
                     raise
-                if limit >= MAX_OUTPUT_TOKENS or attempt == 2:
+                if limit >= MAX_OUTPUT_TOKENS or length_retries == 2:
                     raise ProviderError(f'The model still reached the response-length limit while {phase} (stop_reason=max_tokens; limit={limit}). Automatic length retries are exhausted. No report was accepted.',
                                         stop_reason='max_tokens', output_limit=limit) from None
                 limit = min(limit*2, MAX_OUTPUT_TOKENS)
+                length_retries += 1
                 progress(f'The answer was cut short. Retrying {phase} with more room…')
-
     def _tools(self, name, args, sources):
         allowed = {s.id: s for s in sources}
         if not isinstance(args, dict):
@@ -113,7 +118,6 @@ class ReviewEngine:
             return {"calendar_days": (date.fromisoformat(args['end']) - date.fromisoformat(args['start'])).days,
                     "method": "end minus start; no regulatory deadline inferred"}
         raise ValueError("Unknown tool; only document retrieval and date arithmetic are allowed")
-
     def _group(self, client, checks, evidence, progress, cancelled, budget=None, prior_findings=None, input_target=TARGET_INPUT_TOKENS):
         if budget is None:
             budget = {'remaining': MAX_REVIEW_REQUESTS}
@@ -150,9 +154,6 @@ class ReviewEngine:
                 value,staged=registry.preview([row])
                 if not fits({**task,'initial_evidence':seeds+value},reserve=reserve):continue
                 registry=staged;seeds.extend(value);sent.add(key)
-        # Reserve governing sections AND decisive record pages before broad
-        # record sections/search. Split combined checks instead of crowding out
-        # a timeline appendix or a no-return rationale with unrelated pages.
         needed=[{'source_id':section.source_id,'chunk_id':c.id,'locator':c.locator,'text':c.text}
                 for section in governing for c in section.chunks]
         needed+=policies.definition_pages(checks,evidence.sources)+index.anchor_pages(checks)
@@ -164,12 +165,8 @@ class ReviewEngine:
         elif len(checks)>1:
             raise SplitEvidencePacket()
         else:
-            # An unusually large single check remains bounded. Coverage makes
-            # unread text explicit and the model can request it with tools.
             seed_rows(needed,12000)
         task['governing_procedure_coverage']=coverage(governing,sent)
-        # Whole heading-defined sections seed each pass; all other content remains
-        # discoverable through the outline and read-only tools. No source deletion.
         derived={(s.file_sha256,c.id) for s in evidence.sources if s.document_id=='MDR' for c in s.chunks}
         source_map={s.id:s for s in evidence.sources}
         for section in index.candidates(checks):
@@ -185,8 +182,6 @@ class ReviewEngine:
             supplied=sum((section.source_id,chunk.id) in sent for chunk in section.chunks)
             task['section_coverage'].append({**section.outline(),'source_id':section.source_id,'supplied_chunks':supplied,
                 'status':'complete' if supplied==len(section.chunks) else 'partial or not yet supplied'})
-        # Ranked procedure hits include their neighbors; the model can read forward
-        # through definitions, tables and exceptions without another keyword guess.
         hits=self.repo.search(query,record_ids,4)+self.repo.search(query,procedure_ids,6)
         expanded=[]
         for hit in hits:expanded.extend(self._tools('read_section',{'source_id':hit['source_id'],'chunk_id':hit['chunk_id']},evidence.sources))
@@ -206,8 +201,6 @@ class ReviewEngine:
                 'gathering evidence', tools=TOOLS, max_tokens=RETRIEVAL_OUTPUT_TOKENS)
             calls = [c for c in answer['content'] if c.get('type') == 'tool_use']
             if not calls:
-                # Keep the initial evidence and retrieved evidence; a narrative draft
-                # is not accepted as the final report.
                 break
             if len(calls) > 8:
                 raise ProviderError("The model requested too many tool calls in one turn.")
@@ -289,7 +282,6 @@ class ReviewEngine:
             'sections':coverage(all_sections,sent), 'governing_procedures':coverage(governing,sent),
             'accuracy_verification':True})
         return review
-
     def run(self, job_id, record_id, stage, policy_selection, files, connection, progress, cancelled, *, attachment_limits=None):
         sources, warnings = [], list(attachment_limits or [])
         attachment_coverage = []
@@ -353,9 +345,6 @@ class ReviewEngine:
             while packets:
                 batch=packets.pop(0)
                 progress(f"Reviewing {batch[0][1].lower()}")
-                # Fresh packets avoid accumulating the entire review in one window.
-                # A gateway count can exceed an estimate: restart with a smaller
-                # packet, never drop tool results out of a live conversation.
                 for retry in range(3):
                     try:
                         result = self._group(client, batch, evidence, progress, cancelled, budget,
@@ -402,8 +391,6 @@ class ReviewEngine:
         return {"review": review.model_dump(), "sources": [{"id": s.id, "name": s.name, "document_id": s.document_id, "revision": s.revision} for s in sources],
                 "record_id": record_id, "model": evidence.model_version, "limitations": evidence.limitations,
                 "usage": client.usage if client else {}, "demo": False}
-
-
 def demo_report(directory, job_id):
     review = Review.model_validate_json((ROOT/'examples/demo_review.json').read_text(encoding='utf-8'))
     evidence = EvidenceManifest.model_validate_json((ROOT/'examples/demo_evidence.json').read_text(encoding='utf-8'))

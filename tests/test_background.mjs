@@ -2,11 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
 import {resolve} from 'node:path';
-
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 function event(){const listeners=[];return{addListener:fn=>listeners.push(fn),fire:(...args)=>listeners.map(fn=>fn(...args)),listeners};}
 async function fixture(options={}){
-  const values={},calls=[],clicks=[],clickedTabs=[],notices=[],portMessages=event(),disconnect=event();
+  const values={},calls=[],clicks=[],clickedTabs=[],notices=[],alarms=new Map(),portMessages=event(),disconnect=event();
   const tab={id:4,url:'https://crm.medtronic.com/sap/',windowId:1},id='abcdefghijklmnopabcdefghijklmnop';
   const tabs=[tab,...(options.initialTabs||[])];
   let token=options.token!==false;
@@ -28,7 +27,7 @@ async function fixture(options={}){
     storage:{session:{get:async key=>({[key]:structuredClone(values[key])}),set:async value=>Object.assign(values,structuredClone(value)),remove:async key=>{delete values[key];}}},
     tabs:{query:async query=>query?.url?tabs:[tab],get:async id=>tabs.find(t=>t.id===id)||({id,openerTabId:4,active:true}),onRemoved:event(),update:async(id,data)=>{calls.push({method:'focus_gch',id,data});},create:async()=>{assert.fail('Trainee workflow must not open a new app tab');}},
     windows:{update:async(id,data)=>{calls.push({method:'focus_window',id,data});}},
-    alarms:{create:async()=>{},clear:async()=>{},onAlarm:event()},
+    alarms:{create:async(name,data)=>alarms.set(name,data),clear:async name=>alarms.delete(name),onAlarm:event()},
     webNavigation:{onCreatedNavigationTarget:event(),onBeforeNavigate:event(),getAllFrames:async({tabId})=>{
       if(options.frames){const result=await options.frames(tabId);if(result!==undefined)return result;}
       return[{frameId:0,url:tabs.find(t=>t.id===tabId)?.url||tab.url},{frameId:8,url:'chrome-extension://'+id+'/panel.html'}];
@@ -47,16 +46,66 @@ async function fixture(options={}){
       if(spec.args[0]==='Attachments')count=0;
       return[{frameId:0,result:{count,score:0,clicked:count>0&&!!spec.args[1]}}];
     }},
-    downloads:{onCreated:event(),onChanged:event(),search:async()=>[],download:async data=>{calls.push({method:'chrome_download',data});return 9;}},
-    webRequest:{onHeadersReceived:event()}
+    downloads:{onCreated:event(),onChanged:event(),search:async query=>options.downloadSearch?options.downloadSearch(query):[],
+      resume:async id=>{calls.push({method:'resume_download',id});if(options.resume)await options.resume(id);},
+      cancel:async id=>calls.push({method:'cancel_download',id}),
+      download:async data=>{calls.push({method:'chrome_download',data});if(options.download)return options.download(data);return 9;}},    webRequest:{onHeadersReceived:event()}
   };
   await import(pathToFileURL(resolve('extension/background.js')).href+'?fixture='+Math.random());
   const sender={id,url:chrome.runtime.getURL('panel.html'),tab};
   const send=(message,from=sender)=>new Promise(resolve=>chrome.runtime.onMessage.listeners[0](message,from,resolve));
   const download=()=>chrome.downloads.onCreated.fire({id:1,url:tab.url+'report.pdf',filename:'C:\\Downloads\\report.pdf',mime:'application/pdf',state:'complete',startTime:new Date().toISOString()});
   const until=async predicate=>{for(let i=0;i<150;i++){if(predicate())return;await wait(10);}assert.fail('Expected workflow state did not arrive');};
-  return{values,calls,clicks,clickedTabs,notices,send,download,until,tab,tabs,events:chrome};
+  return{values,calls,clicks,clickedTabs,notices,alarms,send,download,until,tab,tabs,events:chrome};
 }
+test('interrupted report resumes after a 30 second alarm without starting a new capture',async()=>{
+  const item={id:7,url:'https://crm.medtronic.com/sap/report.pdf',filename:'C:\\Downloads\\report.pdf',mime:'application/pdf',state:'interrupted',canResume:true,startTime:new Date().toISOString()};
+  const f=await fixture({downloadSearch:()=>[item]});await f.send({type:'START'});
+  const before=Date.now();f.events.downloads.onCreated.fire(item);
+  await f.until(()=>f.alarms.has('download-retry'));
+  assert.ok(f.alarms.get('download-retry').when>=before+30000);
+  assert.equal(f.calls.some(c=>c.method==='resume_download'),false);
+  f.events.alarms.onAlarm.fire({name:'download-retry'});
+  await f.until(()=>f.calls.some(c=>c.method==='resume_download'));
+  item.state='complete';f.events.downloads.onChanged.fire({id:7,state:{current:'complete'}});
+  await f.until(()=>f.values['flow-4']?.phase==='done');
+  assert.equal(f.calls.filter(c=>c.method==='capture_start').length,1);
+  assert.equal(f.calls.filter(c=>c.method==='capture_complete').length,1);
+  assert.deepEqual(f.clicks,['Print','Detailed Event Report']);
+});
+test('non-resumable report is downloaded again and the failed file is ignored',async()=>{
+  const item={id:7,url:'https://crm.medtronic.com/sap/report.pdf',filename:'C:\\Downloads\\report.pdf',mime:'application/pdf',state:'interrupted',canResume:false,startTime:new Date().toISOString()};
+  const f=await fixture({downloadSearch:()=>[item]});await f.send({type:'START'});
+  f.events.downloads.onCreated.fire(item);await f.until(()=>f.alarms.has('download-retry'));
+  f.events.alarms.onAlarm.fire({name:'download-retry'});
+  await f.until(()=>f.calls.some(c=>c.method==='chrome_download'));
+  f.events.downloads.onCreated.fire({...item,state:'complete'});
+  f.events.downloads.onCreated.fire({...item,id:9,state:'complete'});
+  await f.until(()=>f.values['flow-4']?.phase==='done');
+  assert.equal(f.calls.filter(c=>c.method==='capture_complete').length,1);
+});
+test('viewer download failure retries the same URL and cancellation clears the retry',async()=>{
+  const f=await fixture({download:()=>{throw new Error('Network failed');}});await f.send({type:'START'});
+  const url=f.tab.url+'generated.pdf';
+  f.events.webRequest.onHeadersReceived.fire({method:'GET',type:'main_frame',tabId:5,url,responseHeaders:[{name:'Content-Type',value:'application/pdf'}]});
+  await f.until(()=>f.alarms.has('download-retry'));
+  f.events.alarms.onAlarm.fire({name:'download-retry'});
+  await f.until(()=>f.calls.filter(c=>c.method==='chrome_download').length===2&&f.values.capture.downloadRetry);
+  assert.equal(f.calls.filter(c=>c.method==='chrome_download')[1].data.url,url);
+  await f.send({type:'CANCEL'});assert.equal(f.alarms.has('download-retry'),false);
+  f.events.alarms.onAlarm.fire({name:'download-retry'});await wait(20);
+  assert.equal(f.calls.filter(c=>c.method==='chrome_download').length,2);
+  assert.equal(f.values['flow-4'].phase,'idle');
+});
+test('viewer HTTP 503 preserves the capture and schedules its failed URL',async()=>{
+  const f=await fixture();await f.send({type:'START'});
+  const url=f.tab.url+'generated.pdf';
+  f.events.webRequest.onHeadersReceived.fire({method:'GET',type:'main_frame',tabId:5,url,statusCode:503,responseHeaders:[{name:'Content-Type',value:'text/html'}]});
+  await f.until(()=>f.alarms.has('download-retry'));
+  assert.equal(f.values.capture.downloadRetry.url,url);
+  assert.equal(f.values['flow-4'].phase,'exporting');
+  await f.send({type:'CANCEL'});
+});
 test('one click exports, reviews and saves without opening an app tab',async()=>{
   const f=await fixture();const start=await f.send({type:'START'});
   assert.equal(start.state.phase,'exporting');
@@ -131,6 +180,38 @@ const preview=(id=5,extra={})=>({id,url:'https://crm.medtronic.com/sap/bc/bsp/sa
 function incomingDownload(chrome,id,name){
   chrome.downloads.onCreated.fire({id,url:'https://crm.medtronic.com/sap/'+name,filename:'C:\\Downloads\\'+name,mime:'text/plain',state:'complete',startTime:new Date().toISOString()});
 }
+test('retrying one attachment keeps earlier attachments and exports the report once',async()=>{
+  const interrupted={id:21,url:'https://crm.medtronic.com/sap/patient.txt',filename:'C:\\Downloads\\patient.txt',mime:'text/plain',state:'interrupted',canResume:true,startTime:new Date().toISOString()};
+  const f=await fixture({downloadSearch:()=>[interrupted],attachments:(spec,chrome)=>{
+    if(spec.args[0]==='scan')return[{frameId:0,result:{found:true,rows:[{key:'rep',name:'rep.txt',downloadable:true},{key:'patient',name:'patient.txt',downloadable:true}],pageKey:'one'}}];
+    if(spec.args[1]==='rep')incomingDownload(chrome,20,'rep.txt');
+    else{interrupted.startTime=new Date().toISOString();chrome.downloads.onCreated.fire(interrupted);}
+    return[{frameId:0,result:{clicked:true}}];
+  }});
+  const starting=f.send({type:'START'});
+  await f.until(()=>f.alarms.has('download-retry'));
+  assert.equal(f.calls.filter(c=>c.method==='capture_attachment').length,1);
+  f.events.alarms.onAlarm.fire({name:'download-retry'});
+  await f.until(()=>f.calls.some(c=>c.method==='resume_download'));
+  interrupted.state='complete';f.events.downloads.onChanged.fire({id:21,state:{current:'complete'}});
+  assert.equal((await starting).state.phase,'exporting');
+  assert.equal(f.calls.filter(c=>c.method==='capture_attachment').length,2);
+  assert.equal(f.calls.filter(c=>c.method==='capture_start').length,1);
+  assert.deepEqual(f.clicks,['Print','Detailed Event Report']);
+  await f.send({type:'CANCEL'});
+});
+test('persistent viewer download failure stops after three retries',async()=>{
+  const f=await fixture({download:()=>{throw new Error('Network failed');}});await f.send({type:'START'});
+  f.events.webRequest.onHeadersReceived.fire({method:'GET',type:'main_frame',tabId:5,url:f.tab.url+'generated.pdf',responseHeaders:[{name:'Content-Type',value:'application/pdf'}]});
+  await f.until(()=>f.alarms.has('download-retry'));
+  for(let attempt=1;attempt<=3;attempt++){
+    f.events.alarms.onAlarm.fire({name:'download-retry'});
+    await f.until(()=>f.calls.filter(c=>c.method==='chrome_download').length===attempt+1&&(attempt===3?f.values['flow-4']?.phase==='error':f.values.capture?.downloadRetry));
+  }
+  assert.equal(f.calls.filter(c=>c.method==='chrome_download').length,4);
+  assert.match(f.values['flow-4'].message,/three automatic retries/);
+  assert.equal(f.calls.filter(c=>c.method==='capture_complete').length,0);
+});
 test('all incoming files across attachment pages are added before the event export',async()=>{
   let page=1,sequence=20;
   const downloaded=[];
