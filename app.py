@@ -1,6 +1,4 @@
-"""Run the single-user GCH companion on localhost. No public web deployment."""
 from __future__ import annotations
-
 import argparse
 import base64
 import binascii
@@ -20,15 +18,12 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 import webbrowser
 from zipfile import ZipFile, ZIP_DEFLATED
-
 from config import DEFAULT_MODEL, DEFAULT_AUTH, SETTINGS_VERSION, PROVIDER, ENVIRONMENT, ENDPOINT, PORT, ROOT, VERSION, MAX_FILE_BYTES, MAX_REQUEST_BYTES, PROCEDURES, BUNDLED_PROCEDURES, data_directory
 from bundled_procedures import load_defaults
 from engine import ReviewEngine, demo_report
 from ingest import source_from_bytes
 from mdt import MDTClient, ProviderError, probe_connection
 from repository import Repository
-
-
 def file_payload(value):
     if not isinstance(value, dict):
         raise ValueError("A file is required.")
@@ -42,14 +37,10 @@ def file_payload(value):
     if not data or len(data) > MAX_FILE_BYTES:
         raise ValueError("Choose a nonempty file smaller than 20 MB.")
     return Path(name).name, data
-
-
 def checked_text(value, label, limit=200):
     if not isinstance(value, str) or not value.strip() or len(value) > limit:
         raise ValueError(f"Enter {label} (up to {limit} characters).")
     return value.strip()
-
-
 class Application:
     def __init__(self, directory, port=PORT, token=None, provider_factory=MDTClient, *, bundled_directory=BUNDLED_PROCEDURES):
         self.directory, self.port = directory, port
@@ -85,16 +76,12 @@ class Application:
                 self.reset_saved_token = True
                 self.connection['token'] = ''
         else:
-            # An orphaned saved credential has no proven environment/provider scope.
             self.reset_saved_token = True
-
     def persist_preferences(self):
-        # The MDT token and the app pairing token are deliberately excluded.
         self.settings_file.write_text(json.dumps({'settings_version': SETTINGS_VERSION, 'model': self.connection['model'],
             'auth_style': self.connection['auth_style'], 'environment':ENVIRONMENT, 'provider':PROVIDER,
             'reset_saved_token':self.reset_saved_token,
             'downloads': str(self.downloads)}, indent=2), encoding='utf-8')
-
     def status(self):
         return {'version': VERSION, 'model': self.connection['model'], 'target_model': DEFAULT_MODEL,
             'token_present': bool(self.connection['token']), 'connection_tested': self.connection['tested'],
@@ -104,13 +91,11 @@ class Application:
             'procedure_setup_errors': self.procedure_setup_errors,
             'downloads': str(self.downloads), 'data_directory': str(self.directory),
             'procedure_count': len(self.repo.catalog())}
-
     def ensure_ready(self):
         if not self.connection['token']:
             raise ValueError("Add your MDT-GPT token in Connection before checking a real record.")
         if not self.repo.catalog():
             raise ValueError("Upload the applicable controlled procedures before checking a real record.")
-
     def _new_job(self, record_id, demo=False):
         job_id = str(uuid4())
         job = {'id': job_id, 'record_id': record_id, 'status': 'queued', 'progress': 0,
@@ -122,7 +107,6 @@ class Application:
                 raise ValueError("Two reviews are already running. Wait or cancel a review before starting another.")
             self.jobs[job_id] = job
         return job
-
     def start_review(self, record_id, stage, policy_selection, files, capture_id=None):
         self.ensure_ready()
         record_id = checked_text(record_id, 'the GCH record ID', 40)
@@ -135,13 +119,11 @@ class Application:
             raise ValueError('Upload one Detailed Event Report or PESR and optionally one matching MDR.')
         job = self._new_job(record_id)
         connection = dict(self.connection)
-
         def progress(message, percent=None):
             with self.lock:
                 job['message'] = message
                 if percent is not None:
                     job['progress'] = percent
-
         def work():
             try:
                 with self.lock:
@@ -159,14 +141,12 @@ class Application:
                 with self.lock:
                     job.update(status='failed', error=str(exc)[:900], message='The review could not be completed')
             except Exception:
-                # Never echo source contents, provider response bodies, or credentials.
                 with self.lock:
                     job.update(status='failed', error='The file could not be processed. Verify the export and supported file type, then try again.', message='The review could not be completed')
             finally:
                 connection['token'] = ''
         self.pool.submit(work)
         return self.public_job(job)
-
     def start_demo(self):
         job = self._new_job('DEMO-001', True)
         try:
@@ -175,17 +155,14 @@ class Application:
         except Exception:
             job.update(status='failed', error='Could not create the synthetic example.')
         return self.public_job(job)
-
     @staticmethod
     def public_job(job):
         return {k: v for k, v in job.items() if k != 'cancelled'}
-
     def get_job(self, job_id):
         with self.lock:
             if job_id not in self.jobs:
                 raise ValueError('This review is not available in the current app session.')
             return self.public_job(self.jobs[job_id])
-
     def capture_start(self, data):
         self.ensure_ready()
         record_id = checked_text(data.get('record_id'), 'the GCH record ID', 40)
@@ -198,7 +175,6 @@ class Application:
             cid = str(uuid4())
             self.captures[cid] = {'record_id': record_id, 'stage': stage, 'started': now, 'claimed': False}
         return {'capture_id': cid, 'expires_in': 180}
-
     def capture_complete(self, cid, data):
         with self.lock:
             cap = self.captures.get(cid)
@@ -223,26 +199,19 @@ class Application:
         finally:
             with self.lock:
                 self.captures.pop(cid, None)
-
-
 class Handler(BaseHTTPRequestHandler):
     server_version = 'GCHLocal/0.2'
-
     @property
     def app(self):
         return self.server.application
-
     def log_message(self, format, *args):
         return  # Never log records, request payloads, or tokens.
-
     def origin_allowed(self):
         origin = self.headers.get('Origin', '')
         allowed = {f'http://127.0.0.1:{self.app.port}', f'http://localhost:{self.app.port}'}
         return not origin or origin in allowed or bool(re.fullmatch(r'chrome-extension://[a-p]{32}', origin))
-
     def host_allowed(self):
         return self.headers.get('Host') in {f'127.0.0.1:{self.app.port}', f'localhost:{self.app.port}'}
-
     def send_bytes(self, status, body, mime='application/json', filename=None):
         self.send_response(status)
         self.send_header('Content-Type', mime)
@@ -265,14 +234,11 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError):
             pass
-
     def reply(self, value, status=200):
         self.send_bytes(status, json.dumps(value).encode('utf-8'))
-
     def authorized(self):
         candidate = self.headers.get('Authorization', '')
         return self.host_allowed() and self.origin_allowed() and hmac.compare_digest(candidate, 'Bearer '+self.app.token)
-
     def payload(self):
         if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
             raise ValueError('Send application/json.')
@@ -286,13 +252,11 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(result, dict):
             raise ValueError('Send a JSON object.')
         return result
-
     def do_OPTIONS(self):
         if self.host_allowed() and self.origin_allowed():
             self.send_bytes(204, b'')
         else:
             self.reply({'error': 'Origin not allowed'}, 403)
-
     def do_GET(self):
         path = urlsplit(self.path).path
         static = {'/': 'index.html', '/app.js': 'app.js', '/styles.css': 'styles.css', '/favicon.svg': 'favicon.svg'}
@@ -331,7 +295,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply({'error': 'Not found'}, 404)
         except (ValueError, OSError) as exc:
             self.reply({'error': str(exc) if isinstance(exc, ValueError) else 'The requested file is unavailable.'}, 400)
-
     def do_POST(self):
         if not self.authorized():
             self.reply({'error': 'Open the app using the launcher or pair this extension again.'}, 403)
@@ -427,7 +390,6 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, ProviderError, KeyError, TypeError, OSError) as exc:
             message = str(exc) if isinstance(exc, (ValueError, ProviderError)) else 'The request could not be processed. Check the inputs and try again.'
             self.reply({'error': message[:1000]}, 400)
-
     def do_DELETE(self):
         if not self.authorized():
             self.reply({'error': 'Not authorized'}, 403)
@@ -438,16 +400,12 @@ class Handler(BaseHTTPRequestHandler):
             self.reply({'ok': True})
         else:
             self.reply({'error': 'Not found'}, 404)
-
-
 def make_server(application):
     server = ThreadingHTTPServer(('127.0.0.1', application.port), Handler)
     server.daemon_threads = True
     server.application = application
     application.port = server.server_address[1]
     return server
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--no-browser', action='store_true')
@@ -473,7 +431,5 @@ def main():
         app.connection['token'] = ''
         server.server_close()
         app.pool.shutdown(wait=False, cancel_futures=True)
-
-
 if __name__ == '__main__':
     main()
