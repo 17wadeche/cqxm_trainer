@@ -1,8 +1,6 @@
-"""Review configuration. The native helper optionally protects tokens with DPAPI."""
 import os
 from pathlib import Path
-
-VERSION = "0.7.0"
+VERSION = "0.7.1"
 ENVIRONMENT = 'production'
 PROVIDER = 'openai_responses'
 ENDPOINT = 'https://api.gpt.medtronic.com/providers/openai/v1/responses'
@@ -27,8 +25,6 @@ MAX_CHECKS_PER_BATCH = 2
 MAX_REVIEW_REQUESTS = 80
 ROOT = Path(__file__).resolve().parent
 BUNDLED_PROCEDURES = ROOT / 'procedures'
-
-
 def data_directory():
     configured = os.environ.get("GCH_DATA_DIR")
     if configured:
@@ -36,8 +32,6 @@ def data_directory():
     if os.name == "nt":
         return Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "GCHCheckMyWork"
     return Path.home() / ".local/share/gch-check-my-work"
-
-
 PROCEDURES = [
     ("027-P043", "Complaint Handling"),
     ("027-WI185", "Intake, Assessment and Complaint Determination"),
@@ -46,8 +40,6 @@ PROCEDURES = [
     ("054-P044", "Regulatory Reporting"),
     ("054-WI198", "US MDR Reportability and Reporting"),
 ]
-
-# Topic prompts are not procedure rules. All rules must come from uploaded sources.
 GROUPS = [
     {"name": "Intake and coding", "checks": [
         ("intake", "Event intake and complaint determination", ["027-P043", "027-WI185"], False),
