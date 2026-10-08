@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-VERSION = "0.7.2"
+VERSION = "0.7.3"
 ENVIRONMENT = 'production'
 PROVIDER = 'openai_responses'
 ENDPOINT = 'https://api.gpt.medtronic.com/providers/openai/v1/responses'

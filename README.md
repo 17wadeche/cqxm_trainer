@@ -1,4 +1,4 @@
-# GCH Check my work — version 0.7.2
+# GCH Check my work — version 0.7.3
 
 A floating button at the top right of GCH. Click **Check my work**, enter an MDT-GPT token if prompted, and open the concise Word training review when it is ready. Report selection, download, source retrieval and review run in the background.
 
@@ -6,7 +6,7 @@ A floating button at the top right of GCH. Click **Check my work**, enter an MDT
 - Trainer / IT installer: INSTALL_FOR_TRAINER.md.
 - Test scope and remaining live verification: VALIDATION.md.
 
-## Incoming information and clearer feedback in 0.7.2
+## Incoming information and clearer feedback in 0.7.3
 
 New reviews use shorter, plain-language feedback for a new learner: a brief observation, one takeaway and one next action. Essential uncertainty and source citations remain. Existing saved reviews are unchanged; generate a new review to use these instructions.
 
