@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "GCH Check my work",
+  "version": "0.6.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxVvMSdnJ6QZQI+bGkHQqSLYepOxE9OxesZSJav8H3Z3Riq551bgCz6aEPat/3X1Vew3bSrDU0luE3BOtP2sYDTlxxTrbnj2EVbJaKkqoZtHJCsSWZQ0RZ/QSpUV4oqGRiWQfQc2iPn4LVnm8NDcvxyuEJ7e9KRtqPyqtFg2FEOyhRdiaPIa+tye64+bUM9+SVRs5KCPLDrVpfu9D1f4R6NpWFhvi2iVjmwukLlBktdnvyLYj3WS4W+WcFwOGgQDRK6mTH2DWUcNNwWLcPs5/x2mLEY1NsKYo7bWhR+ERCroPNakwbE2d81m3FPIBXYONJPqyyUCJSSTj+M7ZWudE0wIDAQAB",
+  "description": "Check your saved GCH work from one floating button and receive a Word training review.",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "scripting",
+    "storage",
+    "downloads",
+    "alarms",
+    "nativeMessaging",
+    "webRequest",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "https://crm.medtronic.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://crm.medtronic.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "panel.html"
+      ],
+      "matches": [
+        "https://crm.medtronic.com/*"
+      ]
+    }
+  ],
+  "action": {
+    "default_title": "Check my work",
+    "default_popup": "panel.html"
+  },
+  "options_page": "options.html"
+}

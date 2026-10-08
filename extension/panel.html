@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Check my work</title><link rel="stylesheet" href="panel.css"></head>
+<body><main id="panel">
+  <button id="check" class="launcher"><span aria-hidden="true">✓</span> <span id="button-label">Check my work</span></button>
+  <section id="card" hidden aria-label="Work check"><div class="card-head"><strong id="heading">Check my work</strong><button id="close" class="icon" aria-label="Collapse">−</button></div>
+    <p id="message" role="status" aria-live="polite"></p>
+    <p id="error" role="alert" hidden></p>
+    <progress id="progress" max="100" value="0" hidden></progress>
+    <form id="token-form" hidden><label for="token">MDT-GPT API token</label><input id="token" type="password" autocomplete="off" spellcheck="false" required maxlength="8192" placeholder="Paste your token">
+      <label class="remember" id="remember-row"><input id="remember" type="checkbox" checked> Remember on this Windows account</label>
+      <p class="note" id="token-note">Your token is sent to MDT-GPT and stored with Windows account protection if you choose Remember.</p>
+      <p class="note">MDT-GPT Production</p>
+      <button id="connect" class="primary" type="submit">Continue</button>
+    </form>
+    <div id="done" hidden><button id="open" class="primary">Open Word report</button><p id="filename" class="note"></p><p class="note">Share the report with your trainer to discuss the findings.</p></div>
+    <button id="setup" class="primary" hidden>Training setup</button>
+    <button id="retry" class="primary" hidden>Try again</button>
+    <button id="cancel" class="link" hidden>Cancel check</button>
+    <p class="note" id="saved-note">Checks use the saved GCH record.</p>
+    <button id="documents" class="link">Documents &amp; settings</button>
+  </section>
+</main><script src="panel.js"></script></body></html>

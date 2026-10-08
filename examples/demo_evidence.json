@@ -1,0 +1,58 @@
+{
+  "mode": "demo",
+  "review_id": "DEMO-RUN-001",
+  "record_id": "DEMO-001",
+  "record_stage": "Intake in progress",
+  "generated_at": "2026-09-25T15:00:00Z",
+  "prompt_version": "0.1.0",
+  "model_version": "No model call — hand-authored synthetic fixture",
+  "template_version": "0.1.0",
+  "policy_selection": "Synthetic demonstration rule only. No Medtronic procedures were supplied.",
+  "expected_check_ids": [
+    "identifier",
+    "followup",
+    "mdr_form"
+  ],
+  "limitations": [
+    "Synthetic layout demonstration only. This document does not assess a real complaint.",
+    "No GCH export, MDT-GPT connection, controlled Medtronic procedure, or MDR was used."
+  ],
+  "sources": [
+    {
+      "id": "record-demo",
+      "kind": "record",
+      "name": "Synthetic event header",
+      "document_id": "DEMO-PESR",
+      "record_id": "DEMO-001",
+      "revision": null,
+      "approved_revision": false,
+      "file_sha256": null,
+      "extracted_text_sha256": "cdd725fabd31ff7bf1ed4af9f64df9fb6e410db7499a5ad21ccef20ae7100257",
+      "chunks": [
+        {
+          "id": "header",
+          "locator": "page 1 Event header",
+          "text": "Event ID: DEMO-001. Stage: Intake in progress. Follow-up log: not included in this synthetic export."
+        }
+      ]
+    },
+    {
+      "id": "rule-demo",
+      "kind": "procedure",
+      "name": "Synthetic exercise rule — not a Medtronic procedure",
+      "document_id": "DEMO-RULE",
+      "record_id": null,
+      "revision": "DEMO ONLY",
+      "approved_revision": false,
+      "file_sha256": null,
+      "extracted_text_sha256": "a6ebb6badf85bb1f3655a86b265147f047008af5b8297e17e3fe7aa294a072b0",
+      "chunks": [
+        {
+          "id": "rule1",
+          "locator": "section 1 Demo identifier rule",
+          "text": "For this synthetic exercise only, the exported event header must display the same event ID as the selected training case. This is not a Medtronic procedure."
+        }
+      ]
+    }
+  ]
+}

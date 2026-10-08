@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "selection": "User-selected default training procedures, supplied 2026-09-28.",
+  "procedures": [
+    {
+      "document_id": "027-P043",
+      "revision": "K",
+      "pdf": "027-P043_K_EN.pdf",
+      "index": "027-P043.json",
+      "sha256": "0c2f8c05a596883434820f4b553cc2ad9a0baac640f79b83f869fa63e703d795"
+    },
+    {
+      "document_id": "027-WI185",
+      "revision": "R",
+      "pdf": "027-WI185_R_EN.pdf",
+      "index": "027-WI185.json",
+      "sha256": "af3c26d27a4ba392908359f6e9ba50e6165ecdc18653e2053e1dad1bf6bad782"
+    },
+    {
+      "document_id": "027-WI186",
+      "revision": "N",
+      "pdf": "027-WI186_N_EN.pdf",
+      "index": "027-WI186.json",
+      "sha256": "c2e7119539b00df4562f3a60a2e817ab205c5d02ebd00d57c548084edb65db1b"
+    },
+    {
+      "document_id": "027-WI188",
+      "revision": "M",
+      "pdf": "027-WI188_M_EN.pdf",
+      "index": "027-WI188.json",
+      "sha256": "126ceededfd8d82298dc668cc1275cc864d58e749b57ff4fc1cadba713b5dad9"
+    },
+    {
+      "document_id": "054-P044",
+      "revision": "L",
+      "pdf": "054-P044_L_EN.pdf",
+      "index": "054-P044.json",
+      "sha256": "48fbf49660d4809fc7d177b907f1745377ebfd71c4d53e438245c9669ccb400c"
+    },
+    {
+      "document_id": "054-WI198",
+      "revision": "P",
+      "pdf": "054-WI198_P_EN.pdf",
+      "index": "054-WI198.json",
+      "sha256": "2fd2dd420bd39059e67b4740b35961512a5aab4d7edc8c2a2c628f312020a580"
+    }
+  ]
+}

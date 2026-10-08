@@ -1,0 +1,59 @@
+{
+  "overall_summary": "This demonstration shows how the report presents one supported observation and two checks with missing inputs. It demonstrates the output format and citation checks, not complaint-review accuracy.",
+  "limitations": [
+    "Follow-up and MDR completeness cannot be assessed from the supplied synthetic header."
+  ],
+  "findings": [
+    {
+      "check_id": "identifier",
+      "record_element": "Event identifier",
+      "what_was_done": "The synthetic header shows DEMO-001, matching the selected demo case.",
+      "record_evidence": [
+        {
+          "source_id": "record-demo",
+          "chunk_id": "header",
+          "quote": "Event ID: DEMO-001."
+        }
+      ],
+      "procedure_references": [
+        {
+          "source_id": "rule-demo",
+          "chunk_id": "rule1",
+          "quote": "the exported event header must display the same event ID as the selected training case."
+        }
+      ],
+      "assessment": "done_properly",
+      "feedback": "The identifier agrees within this synthetic example. No conclusion about actual GCH records is implied.",
+      "priority": "none",
+      "study_action": ""
+    },
+    {
+      "check_id": "followup",
+      "record_element": "Follow up documentation",
+      "what_was_done": "The synthetic export states that the follow-up log is not included.",
+      "record_evidence": [
+        {
+          "source_id": "record-demo",
+          "chunk_id": "header",
+          "quote": "Follow-up log: not included in this synthetic export."
+        }
+      ],
+      "procedure_references": [],
+      "assessment": "not_assessable",
+      "feedback": "Obtain the relevant log and applicable procedure before assessing the work. Missing export content is not a failure.",
+      "priority": "medium",
+      "study_action": "Ask the trainer which follow-up evidence and procedure apply at this stage."
+    },
+    {
+      "check_id": "mdr_form",
+      "record_element": "MDR form completeness",
+      "what_was_done": "No MDR form or applicable controlled guidance was supplied.",
+      "record_evidence": [],
+      "procedure_references": [],
+      "assessment": "not_assessable",
+      "feedback": "Obtain the matching MDR and applicable guidance if this check is in scope. The PESR header cannot establish form completeness.",
+      "priority": "medium",
+      "study_action": "Confirm the review scope and supply the matching MDR and required guidance if applicable."
+    }
+  ]
+}
