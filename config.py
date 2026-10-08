@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-VERSION = "0.7.1"
+VERSION = "0.7.2"
 ENVIRONMENT = 'production'
 PROVIDER = 'openai_responses'
 ENDPOINT = 'https://api.gpt.medtronic.com/providers/openai/v1/responses'
@@ -21,7 +21,7 @@ CONTEXT_HEADROOM = 8192
 RETRIEVAL_OUTPUT_TOKENS = 4096
 REVIEW_OUTPUT_TOKENS = 8192
 MAX_OUTPUT_TOKENS = 16384
-MAX_CHECKS_PER_BATCH = 2
+MAX_CHECKS_PER_BATCH = 5
 MAX_REVIEW_REQUESTS = 80
 ROOT = Path(__file__).resolve().parent
 BUNDLED_PROCEDURES = ROOT / 'procedures'

@@ -1,11 +1,11 @@
-# Trainer / IT installation — version 0.7.0
+# Trainer / IT installation — version 0.7.2
 
 ## Update the existing installation
 
 1. Close Chrome completely so the old background helper exits.
 2. Extract this package and replace the files inside the **same existing GCH_Check_My_Work_App installation folder**, including `extension` and `procedures`.
 3. Reopen Chrome. At `chrome://extensions`, reload **GCH Check my work**, then refresh the GCH page.
-4. Run **Install-Windows.cmd** again to install the added email/spreadsheet/text parsers. In **Documents & settings**, confirm **Background helper version: 0.7.0**. Connection settings must show Production, `gpt-5.6-terra` and `Authorization: Bearer`.
+4. Run **Install-Windows.cmd** again to install the added email/spreadsheet/text parsers. In **Documents & settings**, confirm **Background helper version: 0.7.2**. Connection settings must show Production, `gpt-5.6-terra` and `Authorization: Bearer`.
 5. Click **Check my work** to generate a new review. Enter the working **Production API token** only if prompted. Remember protects it for the Windows account.
 
 The extension ID and native registration remain valid when the installation folder is unchanged. If you move the folder, run Install-Windows.cmd again and load the extension from its new location. Remove any separate older extension copy. Keep the manifest key and native_config.json identity together.
@@ -22,7 +22,7 @@ The migration resets previous provider/model/auth/environment settings and clear
 
 Chrome starts the helper automatically. No separate app window, web server or pairing code is needed. API credentials are not included in this download.
 
-For 0.7.0, verify that Check my work collects every text attachment from the selected event before exporting its report, including files on later pages. Use synthetic or approved training files to compare the original reporter's account with the recorded description, including a deliberate discrepancy. Check `attachment_coverage.json` and the report's limitations for any unreadable or unavailable file. Older DOC/XLS/PPT attachments need LibreOffice on PATH or an exported text-based copy. Reload the extension after the helper update; no extension-key or token-setting migration is required.
+For 0.7.2, verify that Check my work collects every text attachment from the selected event before exporting its report, including files on later pages. Use synthetic or approved training files to compare the original reporter's account with the recorded description, including a deliberate discrepancy. Check `attachment_coverage.json` and the report's limitations for any unreadable or unavailable file. Older DOC/XLS/PPT attachments need LibreOffice on PATH or an exported text-based copy. Reload the extension after the helper update; no extension-key or token-setting migration is required.
 
 Version 0.6.0 improves evidence selection and adds a second applicability verification without changing the working connection. Successfully remembered 0.5.1 Production credentials are preserved. The prior gateway response-name fix remains.
 

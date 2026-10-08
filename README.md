@@ -1,4 +1,4 @@
-# GCH Check my work — version 0.7.0
+# GCH Check my work — version 0.7.2
 
 A floating button at the top right of GCH. Click **Check my work**, enter an MDT-GPT token if prompted, and open the concise Word training review when it is ready. Report selection, download, source retrieval and review run in the background.
 
@@ -6,7 +6,7 @@ A floating button at the top right of GCH. Click **Check my work**, enter an MDT
 - Trainer / IT installer: INSTALL_FOR_TRAINER.md.
 - Test scope and remaining live verification: VALIDATION.md.
 
-## Incoming information and clearer feedback in 0.7.0
+## Incoming information and clearer feedback in 0.7.2
 
 New reviews use shorter, plain-language feedback for a new learner: a brief observation, one takeaway and one next action. Essential uncertainty and source citations remain. Existing saved reviews are unchanged; generate a new review to use these instructions.
 
@@ -29,6 +29,10 @@ Every draft receives a second evidence/applicability verification. It distinguis
 For unambiguous complete regulatory-report pages, the helper supplies observed aware-to-submission calendar intervals and comparisons to the displayed due date. These calculations do not choose the governing clock rule or declare timeliness. Ambiguous date sets are left to explicit retrieval/date-tool use.
 
 The added verification uses another model turn per evidence packet, so reviews may take longer and use more tokens. Production, `gpt-5.6-terra`, authentication, Chrome identity, saved tokens and procedure replacements remain as in 0.5.1.
+
+Related checks now share an evidence packet within each review group, up to five checks, instead of repeating shared sources in batches of two. If the governing evidence will not fit, the helper splits into smaller batches before making an API call. Retrieval, draft generation, the separate evidence/applicability verification and citation validation remain in place.
+
+A synthetic full-review benchmark using the six bundled procedures and a mocked gateway used **28 calls instead of 36**, with approximately **18% fewer estimated input tokens**. This measures request overhead, not live answer quality, gateway latency or billed cost. Savings vary with record length, attachments, retrieval and retries; compare a live training review with trainer judgment before claiming equivalent answer quality.
 
 ## Production and GPT-5.6-terra
 

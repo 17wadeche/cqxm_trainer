@@ -182,6 +182,8 @@ class ReviewEngine:
             supplied=sum((section.source_id,chunk.id) in sent for chunk in section.chunks)
             task['section_coverage'].append({**section.outline(),'source_id':section.source_id,'supplied_chunks':supplied,
                 'status':'complete' if supplied==len(section.chunks) else 'partial or not yet supplied'})
+        if len(checks)>2 and any(s['status']!='complete' for s in task['section_coverage']):
+            raise SplitEvidencePacket()
         hits=self.repo.search(query,record_ids,4)+self.repo.search(query,procedure_ids,6)
         expanded=[]
         for hit in hits:expanded.extend(self._tools('read_section',{'source_id':hit['source_id'],'chunk_id':hit['chunk_id']},evidence.sources))
@@ -351,7 +353,8 @@ class ReviewEngine:
                                              prior_findings=findings,input_target=TARGET_INPUT_TOKENS//(2**retry))
                         break
                     except SplitEvidencePacket:
-                        packets[0:0]=[[check] for check in batch]
+                        midpoint=(len(batch)+1)//2
+                        packets[0:0]=[batch[:midpoint],batch[midpoint:]]
                         progress('Reviewing these areas separately to include their governing evidence…')
                         result=None
                         break

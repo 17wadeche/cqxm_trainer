@@ -1,6 +1,6 @@
 # Validation record
 
-## 8 October 2026 — v0.7.0
+## 8 October 2026 — v0.7.2
 
 All **141 Python tests and 44 JavaScript tests passed (185 total)**. New synthetic checks exercise incoming and forwarded emails, RTF/HTML/CSV/spreadsheet/slide/OpenDocument/ZIP text extraction; event association without an ID in patient correspondence; rejection of explicitly mismatched event IDs; bounded native download paths, freshness and duplicate checks; attachment evidence in model packets; required citations from both the event and incoming information for narrative; unreadable-file coverage; and the complete native-helper flow through Word creation and saving.
 

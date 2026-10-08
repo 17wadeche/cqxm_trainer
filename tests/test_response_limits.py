@@ -169,7 +169,7 @@ class ReviewRecoveryTests(unittest.TestCase):
                 nonlocal failed,failed_index
                 calls.append(deepcopy(payload))
                 task=json.loads(payload['input'][1]['content'])
-                if not failed and task['expected_checks'][0]['id']=='identifiers' and 'text' in payload:
+                if not failed and task['expected_checks'][0]['id']=='gfe' and 'text' in payload:
                     failed=True;failed_index=len(calls)-1;raise rejected('Service unavailable',503)
                 return invoke_mock(mock,payload)
             return MDTClient(token,model,style,transport=transport,**kwargs)
