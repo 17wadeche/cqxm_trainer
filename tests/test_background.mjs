@@ -35,6 +35,7 @@ async function fixture(options={}){
     }},
     scripting:{executeScript:async spec=>{
       assert.deepEqual(spec.target.frameIds,[0]);
+      if(spec.func.name==='htmlAttachmentBody')return options.htmlBody?options.htmlBody(spec):[{frameId:0,result:null}];
       if(spec.func.name==='recordContext')return[{frameId:0,result:{recordIds:['708930960'],status:'Re-Open'}}];
       if(spec.func.name==='attachmentsInFrame')return options.attachments?options.attachments(spec,chrome):[{frameId:0,result:{found:false,rows:[]}}];
       if(spec.args[1]){clicks.push(spec.args[0]);clickedTabs.push({label:spec.args[0],tabId:spec.target.tabId});}
@@ -126,7 +127,6 @@ test('cancel during export handoff cancels the returned review and leaves the pa
   assert.equal(f.values['flow-4'].phase,'idle');
   assert.equal(f.calls.filter(c=>c.method==='job').length,0);
 });
-
 const preview=(id=5,extra={})=>({id,url:'https://crm.medtronic.com/sap/bc/bsp/sap/bsp_wd_base/popup_test.htm',openerTabId:4,windowId:20,...extra});
 function incomingDownload(chrome,id,name){
   chrome.downloads.onCreated.fire({id,url:'https://crm.medtronic.com/sap/'+name,filename:'C:\\Downloads\\'+name,mime:'text/plain',state:'complete',startTime:new Date().toISOString()});
@@ -165,6 +165,69 @@ test('an attachment transfer failure is included in the review coverage',async()
     }});
   await f.send({type:'START'});f.download();await f.until(()=>f.values['flow-4']?.phase==='done');
   assert.match(f.calls.find(c=>c.method==='capture_complete').data.attachment_limits[0],/rep.txt.*20 MB/);
+});
+test('HTML content-server attachment body is collected without a download',async()=>{
+  const url='https://crm.medtronic.com/sap/bc/contentserver/010?docId=synthetic&secKey=not-a-real-key';
+  const text='Original Text\nFrom: rep@example.test\nSynthetic incoming patient information.';
+  const f=await fixture({summaryTabs:[4],htmlBody:spec=>{
+    assert.equal(spec.target.tabId,5);assert.equal(spec.args[0],url);
+    globalThis.location={href:url};
+    globalThis.document={readyState:'complete',contentType:'text/html',body:{innerText:text}};
+    try{
+      assert.equal(spec.func(url+'wrong'),null);
+      document.readyState='loading';assert.equal(spec.func(url),null);
+      document.readyState='complete';document.body.innerText='x'.repeat(500001);
+      assert.match(spec.func(url).error,/text limit/);
+      document.body.innerText=text;
+      return[{frameId:0,result:spec.func(url)}];
+    }finally{delete globalThis.location;delete globalThis.document;}
+  },attachments:(spec,chrome)=>{
+    if(spec.args[0]==='scan')return[{frameId:0,result:{found:true,rows:[{key:'email',name:'rep.html',excluded:false,downloadable:true}],pageKey:'one'}}];
+    chrome.webNavigation.onCreatedNavigationTarget.fire({tabId:5,sourceTabId:4,url});
+    chrome.webNavigation.onBeforeNavigate.fire({tabId:5,frameId:0,url});
+    chrome.webRequest.onHeadersReceived.fire({method:'GET',type:'main_frame',tabId:5,frameId:0,url,responseHeaders:[{name:'Content-Type',value:'text/html; charset=utf-8'}]});
+    return[{frameId:0,result:{clicked:true}}];
+  }});
+  f.tabs.push({id:5,url,openerTabId:4});
+  await f.send({type:'START'});
+  const added=f.calls.find(c=>c.method==='capture_attachment_text');
+  assert.equal(added.data.text,text);assert.equal(added.data.name,'rep.html');
+  assert.equal(JSON.stringify(added).includes('secKey'),false);
+  assert.equal(f.calls.some(c=>c.method==='chrome_download'),false);
+  f.download();await f.until(()=>f.values['flow-4']?.phase==='done');
+});
+test('cancelling while HTML body is being read prevents attachment transfer',async()=>{
+  let release,reading=false;
+  const blocked=new Promise(resolve=>{release=resolve;});
+  const url='https://crm.medtronic.com/sap/bc/contentserver/010?docId=synthetic';
+  const f=await fixture({htmlBody:async()=>{reading=true;await blocked;return[{frameId:0,result:{text:'Synthetic email'}}];},
+    attachments:(spec,chrome)=>{
+      if(spec.args[0]==='scan')return[{frameId:0,result:{found:true,rows:[{key:'email',name:'rep.html',excluded:false,downloadable:true}],pageKey:'one'}}];
+      chrome.webNavigation.onCreatedNavigationTarget.fire({tabId:5,sourceTabId:4,url});
+      chrome.webNavigation.onBeforeNavigate.fire({tabId:5,frameId:0,url});
+      chrome.webRequest.onHeadersReceived.fire({method:'GET',type:'main_frame',tabId:5,url,responseHeaders:[{name:'Content-Type',value:'text/html'}]});
+      return[{frameId:0,result:{clicked:true}}];
+    }});
+  f.tabs.push({id:5,url,openerTabId:4});
+  const starting=f.send({type:'START'});await f.until(()=>reading);
+  await f.send({type:'CANCEL'});release();await starting;
+  assert.equal(f.calls.some(c=>c.method==='capture_attachment_text'),false);
+  assert.equal(f.clicks.includes('Print'),false);
+});
+test('unrelated HTML viewers are never scraped for an attachment',async()=>{
+  const url='https://crm.medtronic.com/sap/bc/contentserver/010?docId=unrelated';
+  const f=await fixture({htmlBody:()=>assert.fail('Unrelated page must not be read'),
+    attachments:(spec,chrome)=>{
+      if(spec.args[0]==='scan')return[{frameId:0,result:{found:true,rows:[{key:'rep',name:'rep.txt',excluded:false,downloadable:true}],pageKey:'one'}}];
+      chrome.webNavigation.onBeforeNavigate.fire({tabId:9,frameId:0,url});
+      chrome.webRequest.onHeadersReceived.fire({method:'GET',type:'main_frame',tabId:9,url,responseHeaders:[{name:'Content-Type',value:'text/html'}]});
+      setTimeout(()=>incomingDownload(chrome,20,'rep.txt'),1100);
+      return[{frameId:0,result:{clicked:true}}];
+    }});
+  f.tabs.push({id:9,url,openerTabId:99});
+  await f.send({type:'START'});
+  assert.equal(f.calls.some(c=>c.method==='capture_attachment_text'),false);
+  await f.send({type:'CANCEL'});
 });
 test('unrecognized attachment pagination stops before generating a partial review',async()=>{
   const f=await fixture({attachments:()=>[{frameId:0,result:{found:true,rows:[],pageKey:'one',paginationUnknown:true}}]});

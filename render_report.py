@@ -3,7 +3,7 @@ import argparse
 from collections import Counter
 from pathlib import Path
 import re
-from docx.shared import Pt
+from docx.shared import Pt, RGBColor
 from models import Review, EvidenceManifest, validate_traceability
 from word_styles import document, table, body
 LABELS = {
@@ -36,10 +36,7 @@ def compact_references(finding, sources):
         if other:location+='; '+ '; '.join(other) if location else '; '.join(other)
         labels.append(docid+(f' Rev {revision}' if revision else '')+'\n'+location)
     return '\n'.join(labels) or 'Rule not established'
-
-
 def write_concise_report(*, record_id, stage, findings, procedures, scope, output, note='', run_note=''):
-    """Layout-only helper. Live callers validate the complete source review first."""
     doc=document('GCH Training Review','Training feedback | Discuss findings with your trainer')
     doc.styles['Title'].font.size=Pt(20)
     body(doc,f'Record {record_id} | Stage {stage}')
@@ -52,11 +49,23 @@ def write_concise_report(*, record_id, stage, findings, procedures, scope, outpu
         ('potential_gap','potential gaps'),('not_assessable','not assessable'),
         ('not_applicable','not applicable')] if counts[key]))
     doc.add_heading('Training review',1)
-    rows=[[i,f['area'],f['observation'],f['references'],LABELS[f['assessment']],f['feedback']]
+    rows=[[i,f['area'],'' if f['assessment']=='done_properly' else f['observation'],f['references'],
+           '✓ Done properly' if f['assessment']=='done_properly' else LABELS[f['assessment']],
+           '' if f['assessment']=='done_properly' else f['feedback']]
           for i,f in enumerate(findings,1)]
-    table(doc,['#','Review area','What the record shows','Procedure reference','Assessment','What to learn or check'],
+    review_table=table(doc,['#','Review area','What the record shows','Procedure reference','Assessment','What to learn or check'],
           rows,[.25,.85,1.35,1.05,.85,2.80],font_size=10,center_cols=(0,),allow_split=True)
-    priorities=sorted([(i,f) for i,f in enumerate(findings,1) if f['priority']!='none' and f['action']],
+    for i,f in enumerate(findings,1):
+        if f['assessment']=='done_properly':
+            cell=review_table.cell(i,4)
+            cell.text=''
+            p=cell.paragraphs[0]
+            p.clear()
+            check=p.add_run('✓')
+            check.font.color.rgb=RGBColor(0,128,0)
+            check.font.size=Pt(10)
+            p.add_run(' Done properly').font.size=Pt(10)
+    priorities=sorted([(i,f) for i,f in enumerate(findings,1) if f['assessment']!='done_properly' and f['priority']!='none' and f['action']],
                       key=lambda pair:{'high':0,'medium':1,'low':2}[pair[1]['priority']])[:5]
     if priorities:
         doc.add_heading('Start here',1)

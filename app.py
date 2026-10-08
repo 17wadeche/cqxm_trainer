@@ -195,6 +195,29 @@ class Application:
             cap['attachments'].append(('ATTACHMENT', path.name, payload))
             cap['paths'].add(path)
         return {'added': True}
+    def capture_attachment_text(self, cid, data):
+        name = checked_text(data.get('name'), 'the attachment name', 240)
+        if '/' in name or '\\' in name or name in {'.', '..'}:
+            raise ValueError('Invalid attachment name.')
+        text = data.get('text')
+        if not isinstance(text, str) or not text.strip() or len(text)>500000:
+            raise ValueError('The HTML attachment is empty or exceeds the text limit.')
+        key = checked_text(data.get('key'), 'the attachment capture key', 80)
+        payload = text.encode('utf-8')
+        with self.lock:
+            cap = self.captures.get(cid)
+            if not cap or cap['claimed'] or time.time()-cap['started'] > CAPTURE_SECONDS:
+                raise ValueError('The capture expired. Start Check my work again.')
+            keys = cap.setdefault('text_keys', set())
+            if key in keys:
+                raise ValueError('This HTML attachment was already added.')
+            if len(cap['attachments']) >= MAX_ATTACHMENTS:
+                raise ValueError('The event exceeds the 100-attachment limit.')
+            if len(payload)>MAX_FILE_BYTES or sum(len(f[2]) for f in cap['attachments'])+len(payload)>MAX_ATTACHMENT_BYTES:
+                raise ValueError('The attachments exceed the file-size limit.')
+            cap['attachments'].append(('ATTACHMENT', name+'.txt', payload))
+            keys.add(key)
+        return {'added': True}
     def capture_path(self, cap, raw_path, *, attachment=False):
         path = Path(checked_text(raw_path, 'the downloaded file path', 1024)).expanduser().resolve()
         try:

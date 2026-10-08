@@ -80,6 +80,10 @@ The six supplied defaults load automatically: 027-P043 K, 027-WI185 R, 027-WI186
 
 ## Package and tests
 
+In the concise Word review, **Done properly** has a green check and blank **What the record shows** and **What to learn or check** cells. These items do not repeat as study priorities; complete findings and citations remain in the saved review/evidence files and optional detailed report.
+
+Incoming HTML documents that open in a related GCH content-server viewer are read from the rendered body, including visible email headers and correspondence, without requiring a Download button. Only a viewer opened during the current attachment selection is eligible. Empty or oversized body text is reported as a collection limitation. Images, hidden content and linked documents are not extracted. This path has synthetic browser/helper tests; live GCH validation is still required.
+
 `extension/` provides the floating GCH panel and automation. `native_host.py` is the background helper started by Chrome. `app.py`, `web/` and `start.sh` retain a manual review utility; the extension uses native messaging, not its old pairing flow. `procedures/` contains the six baseline documents. `examples/` contains clearly marked synthetic demonstrations.
 
 ```bash

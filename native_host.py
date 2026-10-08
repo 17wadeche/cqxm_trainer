@@ -177,6 +177,9 @@ class NativeService:
         if method == 'capture_attachment':
             self.ready()
             return self.app.capture_attachment(data.get('capture_id'), data)
+        if method == 'capture_attachment_text':
+            self.ready()
+            return self.app.capture_attachment_text(data.get('capture_id'), data)
         if method == 'job':
             return self.job_status(checked_text(data.get('id'), 'the review ID', 40))
         if method == 'cancel_job':

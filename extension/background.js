@@ -3,7 +3,6 @@ const HOST='com.gch.check_my_work', GCH='https://crm.medtronic.com/';
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 let nativePort=null, sequence=0, startBusy=false, downloadQueue=Promise.resolve();
 const pending=new Map(), polling=new Set();
-
 function native(method,data={}) {
   if(!nativePort) {
     nativePort=chrome.runtime.connectNative(HOST);
@@ -52,8 +51,6 @@ async function tabFor(sender){return sender.tab||(await chrome.tabs.query({activ
 async function permittedFrames(tabId){return((await chrome.webNavigation.getAllFrames({tabId}))||[]).filter(f=>f.url.startsWith(GCH)).map(f=>f.frameId);}
 const navigationKey=tabId=>'gch-navigation-'+tabId;
 const parentKey=tabId=>'gch-parent-'+tabId;
-// Chrome exposes popups as tabs in another window. Retain browser-provided
-// parent links, including when SAP does not set tabs.Tab.openerTabId.
 chrome.webNavigation.onCreatedNavigationTarget.addListener(details=>{
   if(!details.url.startsWith(GCH)&&details.url!=='about:blank')return;
   chrome.storage.session.set({[parentKey(details.tabId)]:{parent:details.sourceTabId,at:Date.now()}}).catch(()=>{});
@@ -160,11 +157,12 @@ async function collectAttachments(active){
       if(!await attachmentCommand(active,frame,'download',row.key))return false;
       let result=null;
       for(let i=0;i<120;i++){
+        await collectHtmlAttachment();
         const latest=await capture();if(latest?.captureId!==active.captureId)return false;
         if(latest.currentAttachment?.done){result=latest.currentAttachment;break;}
         await delay(250);
       }
-      if(!result)throw new Error('Incoming attachment '+row.name.slice(0,180)+' did not download. Use its Download button, then try Check my work again.');
+      if(!result)throw new Error('Incoming attachment '+row.name.slice(0,180)+' could not be downloaded or read from its HTML viewer. Try again after it finishes loading.');
       if(result.error)limits.push('Incoming attachment '+row.name.slice(0,180)+' could not be collected: '+result.error.slice(0,220));
     }
     if(page.paginationUnknown)throw new Error('The attachment page controls are unsupported. Ask your trainer to check for additional pages.');
@@ -179,6 +177,34 @@ async function collectAttachments(active){
   const current=await capture();if(current?.captureId!==active.captureId)return false;
   await chrome.storage.session.set({capture:{...current,role:'report',currentAttachment:null,downloadId:null,requestedDownload:false,processing:false,attachmentLimits:limits,reportStarted:Date.now()}});
   return true;
+}
+function htmlAttachmentBody(expectedUrl){
+  if(location.href!==expectedUrl||document.readyState!=='complete'||document.contentType!=='text/html')return null;
+  const text=document.body?.innerText||'';
+  if(text.length>500000)return {error:'The HTML attachment exceeds the text limit.'};
+  if(!text.trim())return {error:'The HTML attachment has no readable body text.'};
+  return {text};
+}
+async function collectHtmlAttachment(){
+  const active=await capture(),item=active?.currentAttachment;
+  if(active?.role!=='attachment'||!item?.viewer||item.done||active.processing||active.downloadId!==null)return;
+  const viewer=item.viewer;
+  let results;
+  try{results=await chrome.scripting.executeScript({target:{tabId:viewer.tabId,frameIds:[viewer.frameId]},func:htmlAttachmentBody,args:[viewer.url]});}
+  catch{return;} // Retry a viewer that is still navigating.
+  const body=results[0]?.result;if(!body)return;
+  const latest=await capture();
+  if(latest?.captureId!==active.captureId||latest.currentAttachment?.started!==item.started||latest.processing||latest.downloadId!==null||latest.currentAttachment.done)return;
+  latest.processing=true;await chrome.storage.session.set({capture:latest});
+  let error=body.error||null;
+  if(!error){
+    try{await native('capture_attachment_text',{capture_id:active.captureId,name:item.name,key:String(item.started),text:body.text});}
+    catch(exc){error=exc.message;}
+  }
+  const current=await capture();
+  if(current?.captureId!==active.captureId||current.currentAttachment?.started!==item.started)return;
+  current.processing=false;current.currentAttachment={...current.currentAttachment,done:true,error};
+  await chrome.storage.session.set({capture:current});
 }
 async function start(tab){
   if(startBusy)throw new Error('A check is starting. Please wait.');
@@ -211,7 +237,6 @@ async function start(tab){
       const current=await capture();if(current?.captureId!==lease.capture_id)return state(tab.id);
       const candidates=await reportTabs(current);
       if(await clickUnique(candidates,'Detailed Event Report',lease.capture_id)){selected=true;break;}
-      // Allow the related SAP popup time to populate before using the older export.
       if(i>=12&&await clickUnique(candidates,'Product Event Summary Report',lease.capture_id)){
         selected=true;
         await update(tab.id,{message:'Using the available Product Event Summary Report…'});
@@ -268,11 +293,10 @@ chrome.downloads.onChanged.addListener(change=>{
   if(change.state?.current==='complete')chrome.downloads.search({id:change.id}).then(items=>items[0]&&enqueue(items[0])).catch(()=>{});
   if(change.state?.current==='interrupted')capture().then(active=>{if(active?.downloadId===change.id)void fail(active.tabId,new Error('GCH’s report download was interrupted. Try again.'));});
 });
-// Automatically download a related PDF-viewer GET response using Chrome's session.
-// Native print dialogs, blob viewers and POST-only exports are not guessed at.
 chrome.webRequest.onHeadersReceived.addListener(details=>{
   const contentType=details.responseHeaders?.find(h=>h.name.toLowerCase()==='content-type')?.value||'';
-  if(details.method!=='GET'||!['main_frame','sub_frame'].includes(details.type)||!/^(application\/(pdf|vnd\.|msword|rtf)|text\/(plain|csv|rtf)|message\/rfc822)/i.test(contentType))return;
+  const html=/^text\/html(?:;|$)/i.test(contentType)&&new URL(details.url).pathname.toLowerCase().startsWith('/sap/bc/contentserver/');
+  if(details.method!=='GET'||!['main_frame','sub_frame'].includes(details.type)||(!html&&!/^(application\/(pdf|vnd\.|msword|rtf)|text\/(plain|csv|rtf)|message\/rfc822)/i.test(contentType)))return;
   const requestCapture=capture();
   setTimeout(async()=>{
     const active=await capture();if(!active||!['report','attachment'].includes(active.role)||active.currentAttachment?.done||active.downloadId!==null||active.requestedDownload||active.processing)return;
@@ -284,8 +308,15 @@ chrome.webRequest.onHeadersReceived.addListener(details=>{
     const fresh=!(active.existingTabIds||[]).includes(details.tabId)||nav.at>=active.started;
     if(!related.includes(details.tabId)&&!(fresh&&(related.includes(tab?.openerTabId)||related.includes(nav.parent))))return;
     const latest=await capture();
-    if(latest?.captureId!==active.captureId||latest.downloadId!==null||latest.requestedDownload||latest.processing)return;
-    latest.requestedDownload=true;await chrome.storage.session.set({capture:latest});
+    if(latest?.captureId!==active.captureId||latest.role!==active.role||latest.currentAttachment?.started!==active.currentAttachment?.started||latest.currentAttachment?.done||latest.downloadId!==null||latest.requestedDownload||latest.processing)return;
+    if(html){
+      if(active.role!=='attachment'||details.tabId===active.tabId||nav.at<active.currentAttachment.started)return;
+      if(latest.currentAttachment.viewer&&latest.currentAttachment.viewer.url!==details.url){
+        await fail(active.tabId,new Error('More than one HTML document opened for this attachment. Start again on the correct event.'));return;
+      }
+      latest.currentAttachment.viewer={tabId:details.tabId,frameId:details.frameId||0,url:details.url};
+      await chrome.storage.session.set({capture:latest});return;
+    }    latest.requestedDownload=true;await chrome.storage.session.set({capture:latest});
     try{
       await chrome.downloads.download({url:details.url,saveAs:false,conflictAction:'uniquify'});
       if(details.tabId!==active.tabId&&tab?.active){
