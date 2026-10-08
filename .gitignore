@@ -1,0 +1,4 @@
+__pycache__
+.venv
+com.gch.check_my_work.json
+native-launch.cmd
