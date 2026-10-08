@@ -64,7 +64,6 @@ def write_concise_report(*, record_id, stage, findings, procedures, scope, outpu
         table(doc,['Priority','Review area','Action'],
               [[f['priority'].title(),f"Item {i} · {f['area']}",f['action']] for i,f in priorities],
               [.65,1.50,5.05],font_size=10,allow_split=True)
-    body(doc,'Trainer ____________________  Date __________  Agreed next step ____________________')
     if run_note:
         p=body(doc,run_note)
         for run in p.runs:run.font.size=Pt(8)
