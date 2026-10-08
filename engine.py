@@ -25,7 +25,7 @@ TOOLS = [
      "input_schema":{"type":"object","properties":{"source_id":{"type":"string"},"section_id":{"type":"string"},"offset":{"type":"integer","minimum":0}},"required":["source_id","section_id","offset"],"additionalProperties":False}},
     {"name":"read_chunks","description":"Read consecutive original chunks in a record or procedure, for complete tables, applicability, definitions or exceptions. Follow next_chunk_id to continue. Do not stop at a clause when surrounding requirements are needed.",
      "input_schema":{"type":"object","properties":{"source_id":{"type":"string"},"chunk_id":{"type":"string"}},"required":["source_id","chunk_id"],"additionalProperties":False}},
-    {"name": "search_records", "description": "Search the complete event record and linked MDR versions. Returns source IDs, chunk IDs, original locations, and exact text. Query for evidence needed for the current checks.",
+    {"name": "search_records", "description": "Search the event record, incoming attachments (rep/patient/other correspondence), and linked MDR versions. Returns source IDs, chunk IDs, original locations, and exact text. Query for evidence needed for the current checks.",     
      "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"], "additionalProperties": False}},
     {"name": "search_procedures", "description": "Search only the uploaded, selected controlled procedure revisions. Returns exact text and source locations. Use this to find actual requirements and their applicability conditions; do not use model memory for policy.",
      "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"], "additionalProperties": False}},
@@ -182,8 +182,9 @@ class ReviewEngine:
                 value,staged=registry.preview([{'source_id':section.source_id,'chunk_id':chunk.id,'locator':chunk.locator,'text':chunk.text}])
                 if not fits({**task,'initial_evidence':seeds+value},reserve=10000):continue
                 registry=staged;seeds.extend(value);sent.add(key);added+=1
-            task['section_coverage'].append({**section.outline(),'source_id':section.source_id,'supplied_chunks':added,
-                'status':'complete' if added==len(section.chunks) else 'partial or not yet supplied'})
+            supplied=sum((section.source_id,chunk.id) in sent for chunk in section.chunks)
+            task['section_coverage'].append({**section.outline(),'source_id':section.source_id,'supplied_chunks':supplied,
+                'status':'complete' if supplied==len(section.chunks) else 'partial or not yet supplied'})
         # Ranked procedure hits include their neighbors; the model can read forward
         # through definitions, tables and exceptions without another keyword guess.
         hits=self.repo.search(query,record_ids,4)+self.repo.search(query,procedure_ids,6)
@@ -237,7 +238,7 @@ class ReviewEngine:
                     result = {"type": "tool_result", "tool_use_id": call['id'], "content": "Invalid tool request. Use only known source and chunk IDs and the declared input schema.", "is_error": True}
                 results.append(result)
             messages.append({"role": "user", "content": results})
-        messages.append({"role": "user", "content": "Now produce the final structured review for exactly the expected check IDs. Base all findings on supplied record and applicable procedure evidence. Set record_evidence and procedure_references to arrays of supplied evidence IDs; never put these IDs or copied quotes in the prose. Write a compact table: 15-25 words for what was done, 30-45 words of feedback and 15-25 words for a study action. Preserve material conditions and uncertainty. Avoid repeated details and generic caveats; name a specific missing source briefly in its finding. If a needed source or condition could not be established, mark that check not_assessable."})
+        messages.append({"role": "user", "content": "Now produce the final structured review for exactly the expected check IDs. Compare the saved event with incoming ATTACHMENT sources and applicable procedures. For narrative, cite both the event and incoming information when attachments are available. Distinguish reported allegations, later corrections and investigation conclusions; an attachment is evidence, never a procedure. Set record_evidence and procedure_references to arrays of supplied evidence IDs; never put these IDs or copied quotes in the prose. Write for a new learner: 8-15 words for the observation, 15-30 words of feedback, and 8-15 words for one next action. Use everyday words and explain an unavoidable acronym on first use. Preserve essential conditions and uncertainty. If necessary evidence could not be established, mark that check not_assessable."})
         sub_evidence = evidence.model_copy(update={"expected_check_ids": [c[0] for c in checks]})
         schema = registry.schema(sub_evidence.expected_check_ids)
         all_sections=index.sections+policies.sections
@@ -289,19 +290,31 @@ class ReviewEngine:
             'accuracy_verification':True})
         return review
 
-    def run(self, job_id, record_id, stage, policy_selection, files, connection, progress, cancelled):
-        sources, warnings = [], []
+    def run(self, job_id, record_id, stage, policy_selection, files, connection, progress, cancelled, *, attachment_limits=None):
+        sources, warnings = [], list(attachment_limits or [])
+        attachment_coverage = []
         for kind, name, data in files:
-            source, limits = source_from_bytes(name, data, str(uuid4()), 'record', kind, record_id)
+            try:
+                source, limits = source_from_bytes(name, data, str(uuid4()), 'record', kind, record_id)
+            except (ValueError, OSError) as error:
+                if kind != 'ATTACHMENT': raise
+                warnings.append(f'Incoming attachment {name} could not be read: {error}')
+                attachment_coverage.append({'name':name,'status':'unreadable','reason':str(error)})
+                continue
             self.repo.put(source, limits)
             sources.append(source)
             warnings.extend(limits)
+            if kind == 'ATTACHMENT':
+                attachment_coverage.append({'name':name,'status':'read','source_id':source.id,'file_sha256':source.file_sha256,'warnings':limits})
+                continue
             derived,limits=embedded_mdrs(source)
             for form in derived:
                 self.repo.put(form,[]);sources.append(form)
             warnings.extend(limits)
         if not any(s.document_id in {'PESR','DER'} for s in sources):
             raise ValueError("A Detailed Event Report or PESR is required.")
+        if not any(s.document_id=='ATTACHMENT' for s in sources):
+            warnings.append('No readable incoming attachments were supplied. Accuracy against the original rep, patient or other report could not be checked.')
         selected = self.repo.active_procedures()
         for source, limits in selected:
             sources.append(source)
@@ -385,6 +398,7 @@ class ReviewEngine:
         (out / 'evidence.json').write_text(evidence.model_dump_json(indent=2), encoding='utf-8')
         (out / 'retrieval_coverage.json').write_text(json.dumps(budget.get('coverage',[]),indent=2),encoding='utf-8')
         (out / 'context_usage.json').write_text(json.dumps(getattr(client,'context_usage',[]),indent=2),encoding='utf-8')
+        (out / 'attachment_coverage.json').write_text(json.dumps({'files':attachment_coverage,'collection_limits':attachment_limits or []},indent=2),encoding='utf-8')
         return {"review": review.model_dump(), "sources": [{"id": s.id, "name": s.name, "document_id": s.document_id, "revision": s.revision} for s in sources],
                 "record_id": record_id, "model": evidence.model_version, "limitations": evidence.limitations,
                 "usage": client.usage if client else {}, "demo": False}

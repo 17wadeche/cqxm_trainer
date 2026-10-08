@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 ENVIRONMENT = 'production'
 PROVIDER = 'openai_responses'
 ENDPOINT = 'https://api.gpt.medtronic.com/providers/openai/v1/responses'
@@ -13,6 +13,9 @@ SETTINGS_VERSION = 3
 PORT = 8765
 MAX_FILE_BYTES = 20 * 1024 * 1024
 MAX_REQUEST_BYTES = 57 * 1024 * 1024
+MAX_ATTACHMENTS = 100
+MAX_ATTACHMENT_BYTES = 200 * 1024 * 1024
+CAPTURE_SECONDS = 900
 CONTEXT_TOKENS = 128000
 TARGET_INPUT_TOKENS = 60000
 MAX_INPUT_TOKENS = 96000

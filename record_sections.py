@@ -1,10 +1,7 @@
-"""Heading-based record routing. All excerpts retain their original PDF locators."""
 from dataclasses import dataclass
 from datetime import date
 import re
-
 from models import EvidenceSource, extracted_digest
-
 HEADINGS = {
     'event': 'Event Summary', 'product': 'Product Line Item Summary',
     'analysis': 'Analysis Summary', 'investigation': 'Investigation Summary',
@@ -23,9 +20,6 @@ ROUTES = {
     'consistency': ['mdr','product','analysis','regulatory','acknowledgments'],
     'closure': ['event','investigation','tasks','analysis','regulatory'],
 }
-
-# These locate evidence pages; they do not interpret field values or prescribe
-# policy. Supply the whole original page to retain adjacent labels and cells.
 ANCHORS = {
     'intake': [r'Event Description text info',r'Complaint Decision Date'],
     'narrative': [r'Event Description text info',r'As Reported Event description',r'Event Narrative'],
@@ -41,8 +35,6 @@ ANCHORS = {
     'consistency': [r'Event Description text info',r'Full UDI',r'Mfr Report #'],
     'closure': [r'Closed Date',r'Completed Date',r'Date Submitted'],
 }
-
-
 @dataclass
 class Section:
     id: str
@@ -54,16 +46,12 @@ class Section:
     def outline(self):
         return {'section_id':self.id,'title':self.title,'first':self.chunks[0].locator,
                 'last':self.chunks[-1].locator,'chunks':len(self.chunks)}
-
-
 def page_groups(source):
     pages={}
     for chunk in source.chunks:
         key=re.sub(r', part \d+$','',chunk.locator)
         pages.setdefault(key,[]).append(chunk)
     return list(pages.values())
-
-
 class RecordIndex:
     def __init__(self,sources):
         self.sources=[s for s in sources if s.kind=='record']
@@ -75,27 +63,23 @@ class RecordIndex:
                 text='\n'.join(c.text for c in page)
                 lines=[' '.join(v.split()) for v in text.splitlines() if v.strip()]
                 heading='\n'.join(lines[:24]).lower()
-                if source.document_id=='MDR':kind='mdr'
+                if source.document_id=='ATTACHMENT':kind='incoming'
+                elif source.document_id=='MDR':kind='mdr'
                 elif any(re.match(r'^MEDWATCH\b',line,re.I) for line in lines[:12]) and not any(line.lower()=='regulatory report summary' for line in lines[:4]):kind='mdr'
                 elif re.search(r'analysis\s+id\s*:',heading):kind='analysis_detail'
                 else:
                     kind=next((k for k,v in HEADINGS.items() if v.lower() in [line.lower() for line in lines[:24]]),None)
                     if kind is None:kind=current.kind if current else 'other'
-                # A new MedWatch A block starts a new report version, even when
-                # its report number matches the preceding initial/follow-up.
                 new_form=kind=='mdr' and bool(re.search(r'A\.\s*PATIENT\s+INFORMATION',text,re.I))
                 if current is None or kind!=current.kind or new_form:
-                    current=Section(f'section-{len(self.sections)+1:03d}',source.id,kind,HEADINGS.get(kind,'Other record content'),[])
+                    current=Section(f'section-{len(self.sections)+1:03d}',source.id,kind,source.name if kind=='incoming' else HEADINGS.get(kind,'Other record content'),[])
                     self.sections.append(current)
                 current.chunks.extend(page)
-
     def outline(self,source_id):
         return [s.outline() for s in self.sections if s.source_id==source_id]
-
     def candidates(self,checks):
-        priorities=list(dict.fromkeys(['event']+[kind for check in checks for kind in ROUTES.get(check[0],[])]))
+        priorities=list(dict.fromkeys(['incoming','event']+[kind for check in checks for kind in ROUTES.get(check[0],[])]))
         return sorted([s for s in self.sections if s.kind in priorities],key=lambda s:priorities.index(s.kind))
-
     def anchor_pages(self,checks):
         patterns=[p for check in checks for p in ANCHORS.get(check[0],[])]
         derived={(s.file_sha256,c.id) for s in self.sources if s.document_id=='MDR' for c in s.chunks}
@@ -108,13 +92,7 @@ class RecordIndex:
                     if source.document_id=='DER' and (source.file_sha256,c.id) in derived:continue
                     rows.append({'source_id':source.id,'chunk_id':c.id,'locator':c.locator,'text':c.text})
         return rows
-
     def calendar_comparisons(self,sent):
-        """Observed field intervals only; never infer a regulatory clock or rule.
-
-        Accept one unambiguous regulatory-report block per complete source page.
-        Ambiguous/multi-report pages require explicit retrieval/date-tool use.
-        """
         results=[]
         for source in self.sources:
             if source.document_id not in {'DER','PESR'}:continue
@@ -140,7 +118,6 @@ class RecordIndex:
                     except ValueError:pass
                 results.append(row)
         return results
-
     def read(self,source_id,section_id,offset=0,limit=12):
         section=next((s for s in self.sections if s.id==section_id and s.source_id==source_id),None)
         if section is None or type(offset)!=int or offset<0 or offset>=len(section.chunks):
@@ -148,13 +125,7 @@ class RecordIndex:
         chunks=section.chunks[offset:offset+limit]
         return [{'source_id':source_id,'chunk_id':c.id,'locator':c.locator,'text':c.text} for c in chunks], {
             'section_id':section_id,'offset':offset,'next_offset':offset+len(chunks) if offset+len(chunks)<len(section.chunks) else None}
-
-
 def embedded_mdrs(source):
-    """Accept forms only when their report numbers also occur in this event's
-    regulatory/acknowledgment sections. Derivation metadata is explicit; a
-    filename or a generic mention of MDR never qualifies as an MDR source.
-    """
     if source.document_id!='DER':return [],[]
     sections=RecordIndex([source]).sections
     linkage='\n'.join(c.text for s in sections if s.kind in {'regulatory','acknowledgments'} for c in s.chunks)
@@ -166,8 +137,6 @@ def embedded_mdrs(source):
         if len(numbers)!=1 or not all(re.search(r'(?<![A-Za-z0-9-])'+re.escape(n)+r'(?![A-Za-z0-9-])',linkage) for n in numbers):
             warnings.append(f'Embedded MedWatch at {section.chunks[0].locator} could not be linked unambiguously to the event; MDR comparison remains limited.')
             continue
-        # Read G.6, not F.7 or H.8 ("Initial Use of Device"). A blank follow-up
-        # field must not be treated as erasing an earlier populated value.
         initial=bool(re.search(r'\[\s*[Xx]\s*\]\s*Initial(?!\s+Use)',text))
         follow=bool(re.search(r'\[\s*[Xx]\s*\]\s*Follow[- ]?up',text,re.I))
         role='initial' if initial and not follow else 'follow-up' if follow and not initial else 'unspecified version'

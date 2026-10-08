@@ -1,10 +1,22 @@
-# GCH Check my work — version 0.6.0
+# GCH Check my work — version 0.7.0
 
 A floating button at the top right of GCH. Click **Check my work**, enter an MDT-GPT token if prompted, and open the concise Word training review when it is ready. Report selection, download, source retrieval and review run in the background.
 
 - Trainees: QUICK_START.md.
 - Trainer / IT installer: INSTALL_FOR_TRAINER.md.
 - Test scope and remaining live verification: VALIDATION.md.
+
+## Incoming information and clearer feedback in 0.7.0
+
+New reviews use shorter, plain-language feedback for a new learner: a brief observation, one takeaway and one next action. Essential uncertainty and source citations remain. Existing saved reviews are unchanged; generate a new review to use these instructions.
+
+Before exporting the event, the extension collects non-image, non-video files from the event's Attachments table, using the stable `GUIDE-AttachmentsTable` name/type columns and each row's own name link. It starts from the first page and follows uniquely identified footer controls. Ambiguous rows, unsupported pagination and downloads that never complete stop collection rather than presenting a complete review. A missing attachment section or a file that cannot be read is named as a limitation. Audio files need a text transcript.
+
+Incoming files become separate `ATTACHMENT` evidence sources for the selected event. Relevant review areas compare the recorded facts with incoming rep, patient or other reporter information and the controlled procedures. Narrative assessments must cite both the event and incoming information when readable attachments exist. Allegations, later corrections and investigation findings remain distinct; attachments never supply procedure rules. The manual utility also accepts multiple incoming files.
+
+Text extraction supports PDF, DOCX, Outlook MSG, EML, RTF, HTML, text/CSV/TSV/JSON/XML, XLSX/XLSM, PPTX/PPTM, DOCM, OpenDocument files and bounded ZIP archives. Legacy DOC/XLS/PPT files require LibreOffice (`libreoffice` or `soffice` on PATH), or a text-based exported copy. Scanned pages require an OCR-processed copy; images and diagrams are not interpreted. Limits are 20 MB per file, 100 incoming files and 200 MB total, with bounded extraction and a 15-minute capture lease. `attachment_coverage.json` records readable/unreadable files and collection limitations; the evidence manifest retains the file digests, extracted text and locations.
+
+Automated checks use synthetic sources and mocked Chrome/gateway behavior. The supplied screenshot establishes table-column identifiers, but not the collapsed name-link behavior or live pagination/download responses; verify collection on a training event in GCH before rollout. Production endpoint, model, authentication and extension identity are unchanged.
 
 ## Evidence accuracy improvements in 0.6.0
 

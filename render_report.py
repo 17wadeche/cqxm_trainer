@@ -1,40 +1,26 @@
-"""Render a reviewed JSON payload into an Anna-style .docx. No network calls."""
 from __future__ import annotations
-
 import argparse
 from collections import Counter
 from pathlib import Path
 import re
 from docx.shared import Pt
-
 from models import Review, EvidenceManifest, validate_traceability
 from word_styles import document, table, body
-
 LABELS = {
     "done_properly": "Done properly", "needs_trainer_review": "Trainer review",
     "potential_gap": "Potential gap", "not_assessable": "Not assessable",
     "not_applicable": "Not applicable",
 }
-
-# These limits only decide where prose is displayed. They never reject or
-# shorten a finding, and the full text remains in both Word and review.json.
 TABLE_LIMITS = {'record_element':120, 'what_was_done':500, 'feedback':600, 'study_action':400}
 FIELD_LABELS = {'record_element':'Record element', 'what_was_done':'What was done',
                 'feedback':'Feedback for new employee', 'study_action':'Study action'}
-
-
 def fits_cell(text, limit):
     return len(text)<=limit and text.count('\n')<=6
-
-
-SHORT_LABELS = {'intake':'Intake', 'narrative':'Narrative', 'identifiers':'Product identifiers',
+SHORT_LABELS = {'intake':'Intake', 'narrative':'Reported event', 'identifiers':'Product identifiers',
     'coding':'Event coding', 'harm':'Patient impact', 'gfe':'Good faith effort',
     'investigation':'Investigation', 'cause':'Cause and conclusion', 'reportability':'US reportability',
-    'timing':'MDR timing', 'consultation':'Medical consultation', 'consistency':'Event and MDR', 'closure':'Re-closure'}
-
-
+    'timing':'Reporting dates', 'consultation':'Medical consultation', 'consistency':'Event and medical report', 'closure':'Closure'}
 def compact_references(finding, sources):
-    """Keep all cited procedure pages while removing repeated chunks/excerpts."""
     grouped={}
     for ref in finding.procedure_references:
         source=sources[ref.source_id]
@@ -68,12 +54,12 @@ def write_concise_report(*, record_id, stage, findings, procedures, scope, outpu
     doc.add_heading('Training review',1)
     rows=[[i,f['area'],f['observation'],f['references'],LABELS[f['assessment']],f['feedback']]
           for i,f in enumerate(findings,1)]
-    table(doc,['#','Record element','What was done','Procedure reference','Assessment','Feedback for trainee'],
+    table(doc,['#','Review area','What the record shows','Procedure reference','Assessment','What to learn or check'],
           rows,[.25,.85,1.35,1.05,.85,2.80],font_size=10,center_cols=(0,),allow_split=True)
     priorities=sorted([(i,f) for i,f in enumerate(findings,1) if f['priority']!='none' and f['action']],
                       key=lambda pair:{'high':0,'medium':1,'low':2}[pair[1]['priority']])[:5]
     if priorities:
-        doc.add_heading('First study priorities',1)
+        doc.add_heading('Start here',1)
         body(doc,'Start with these actions. Other points for discussion are in the review table.')
         table(doc,['Priority','Review area','Action'],
               [[f['priority'].title(),f"Item {i} · {f['area']}",f['action']] for i,f in priorities],
@@ -84,16 +70,20 @@ def write_concise_report(*, record_id, stage, findings, procedures, scope, outpu
         for run in p.runs:run.font.size=Pt(8)
     output.parent.mkdir(parents=True,exist_ok=True)
     doc.save(output)
-
-
 def render(review: Review, evidence: EvidenceManifest, output: Path, *, detailed=False) -> None:
     if detailed:
         return render_detailed(review,evidence,output)
     validate_traceability(review,evidence)
     sources={s.id:s for s in evidence.sources}
     procedures='; '.join(dict.fromkeys(s.document_id+' Rev '+str(s.revision) for s in evidence.sources if s.kind=='procedure'))
-    record_types=', '.join(dict.fromkeys(s.document_id for s in evidence.sources if s.kind=='record')) or 'No record source'
-    scope=f'Sources: {record_types}. Assessments apply to the supplied evidence. Missing export content does not prove omitted work; visuals and unavailable sources need trainer confirmation.'
+    incoming=[s for s in evidence.sources if s.document_id=='ATTACHMENT']
+    record_types=', '.join(dict.fromkeys(s.document_id for s in evidence.sources if s.kind=='record' and s.document_id!='ATTACHMENT')) or 'No event report'
+    scope=f'Sources: {record_types} and {len(incoming)} readable incoming attachment(s). A missing export field does not prove the work was missed.'
+    if not incoming:
+        scope+=' The original rep or patient information could not be compared.'
+    attachment_limits=[v for v in evidence.limitations if 'attachment' in v.lower() and not v.startswith('No readable incoming')]
+    if attachment_limits:
+        scope+=' Incoming information is incomplete: '+' '.join(dict.fromkeys(attachment_limits))
     if not any(s.document_id=='MDR' and s.kind=='record' for s in evidence.sources):
         scope+=' A matching MDR was not supplied.'
     findings=[{'area':SHORT_LABELS.get(f.check_id,f.record_element),'observation':f.what_was_done,
@@ -103,8 +93,6 @@ def render(review: Review, evidence: EvidenceManifest, output: Path, *, detailed
         findings=findings,procedures=procedures,scope=scope,output=output,
         note='SYNTHETIC DEMO | No GCH or MDT-GPT connection' if evidence.mode=='demo' else '',
         run_note=f'Review {evidence.review_id} | {evidence.generated_at[:10]} | Full findings and source evidence remain in the saved review files.')
-
-
 def render_detailed(review: Review, evidence: EvidenceManifest, output: Path) -> None:
     validate_traceability(review, evidence)
     sources = {s.id: s for s in evidence.sources}
@@ -124,13 +112,11 @@ def render_detailed(review: Review, evidence: EvidenceManifest, output: Path) ->
     for item in dict.fromkeys(evidence.limitations + review.limitations):
         doc.add_paragraph(item, "List Bullet")
     body(doc, "A missing export field is not proof that work was omitted. Assessments apply only to the supplied evidence and the selected procedure revisions.")
-
     def citation_label(ref):
         s = sources[ref.source_id]
         c = next(c for c in s.chunks if c.id == ref.chunk_id)
         rev = f", revision {s.revision}" if s.revision else ""
         return f"{s.document_id}{rev}, {c.locator}"
-
     doc.add_heading("Training review table", 1).paragraph_format.page_break_before = True
     body(doc, "Evidence excerpts follow the table. Trainer review and potential gap findings require a human decision.")
     rows = []
@@ -141,10 +127,8 @@ def render_detailed(review: Review, evidence: EvidenceManifest, output: Path) ->
             return text
         details.setdefault(index,{})[field]=text
         return f'See item {index} in Detailed review feedback.'
-
     def item_heading(index, finding):
         return f'Item {index} '+finding.record_element if fits_cell(finding.record_element,120) else f'Item {index}'
-
     for i, f in enumerate(review.findings, 1):
         refs = "\n".join(citation_label(r) for r in f.procedure_references) or "No applicable rule supplied"
         if not fits_cell(refs,350):
@@ -161,7 +145,6 @@ def render_detailed(review: Review, evidence: EvidenceManifest, output: Path) ->
         table(doc, ["Priority", "Review area", "Action for trainee and trainer"], rows, [.75, 2.25, 4.20])
     else:
         body(doc, "No study priorities were supplied. This does not establish overall compliance.")
-
     if details:
         doc.add_heading('Detailed review feedback',1).paragraph_format.page_break_before=True
         body(doc,'Longer explanations are shown in full here. Item numbers match the training review table.')
@@ -171,7 +154,6 @@ def render_detailed(review: Review, evidence: EvidenceManifest, output: Path) ->
             for field,text in fields.items():
                 body(doc,FIELD_LABELS[field],bold_lead=FIELD_LABELS[field])
                 body(doc,text).paragraph_format.keep_together=False
-
     doc.add_heading("Evidence and trainer notes", 1).paragraph_format.page_break_before = True
     for i, f in enumerate(review.findings, 1):
         doc.add_heading(item_heading(i,f), 2)
@@ -190,8 +172,6 @@ def render_detailed(review: Review, evidence: EvidenceManifest, output: Path) ->
     body(doc, "Source file and extracted text digests remain in the associated evidence manifest. Excerpt matching verifies text presence only; it does not verify the reasoning or establish that the export is complete.")
     output.parent.mkdir(parents=True, exist_ok=True)
     doc.save(output)
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--review", type=Path, required=True)
@@ -203,7 +183,5 @@ def main():
     evidence = EvidenceManifest.model_validate_json(args.evidence.read_text(encoding="utf-8"))
     render(review, evidence, args.output, detailed=args.detailed)
     print(args.output.resolve())
-
-
 if __name__ == "__main__":
     main()

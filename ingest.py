@@ -1,19 +1,14 @@
-"""Extract source-located text; unreadable pages and images stay visible as limits."""
 import hashlib
 import io
 import re
 from pathlib import Path
 from zipfile import ZipFile, BadZipFile
-
 from docx import Document
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 from pypdf import PdfReader
-
 from config import MAX_FILE_BYTES
 from models import Chunk, EvidenceSource, extracted_digest
-
-
 def split_text(text, size=2400, overlap=180):
     text = text.replace("\x00", "").strip()
     while text:
@@ -27,10 +22,7 @@ def split_text(text, size=2400, overlap=180):
             stop = size
         yield text[:stop].strip()
         text = text[max(1, stop-overlap):].strip()
-
-
 def _docx_blocks(parent, prefix="Body"):
-    # Preserve nested tables and their row/cell locations, unlike Document.paragraphs.
     element = parent.element.body if hasattr(parent, "element") else parent._tc
     index = 0
     for child in element.iterchildren():
@@ -48,9 +40,7 @@ def _docx_blocks(parent, prefix="Body"):
                         continue
                     visited.add(cell._tc)
                     yield from _docx_blocks(cell, f"{prefix}, table {index}, row {rnum}, cell {cnum}")
-
-
-def extract(name, data):
+def extract(name, data, *, depth=0):
     if not data or len(data) > MAX_FILE_BYTES:
         raise ValueError("Choose a nonempty file smaller than 20 MB.")
     ext = Path(name).suffix.lower()
@@ -108,7 +98,15 @@ def extract(name, data):
             if paragraph.strip():
                 blocks.append((f"Text paragraph {i}", paragraph))
     else:
-        raise ValueError("Supported files are PDF, DOCX, and UTF-8 TXT.")
+        from attachment_text import extra_blocks
+        try:
+            blocks, warnings = extra_blocks(name, data, depth)
+        except ValueError:
+            raise
+        except Exception:
+            raise ValueError('This attachment could not be read. Export a text-based copy.') from None
+    if sum(len(text) for _, text in blocks) > 5_000_000:
+        raise ValueError('The extracted text exceeds the 5 MB limit. Split this attachment.')
     chunks = []
     for locator, text in blocks:
         for i, part in enumerate(split_text(text), 1):
@@ -118,8 +116,6 @@ def extract(name, data):
     if len(chunks) > 5000:
         raise ValueError("Too many text sections. Split this source into individual documents.")
     return chunks, warnings
-
-
 def verify_record(chunks, record_id, kind):
     if not re.fullmatch(r"[A-Za-z0-9_-]{3,40}", record_id):
         raise ValueError("Enter a valid GCH record ID.")
@@ -138,8 +134,6 @@ def verify_record(chunks, record_id, kind):
         raise ValueError("The file is not identifiable as a Product Event Summary Report.")
     if kind == 'DER' and not re.search(r'\bdetailed\s+event\s+report\b',full[:2500],re.I):
         raise ValueError('The file is not identifiable as a Detailed Event Report.')
-
-
 def source_from_bytes(name, data, source_id, kind, document_id, record_id=None,
                       revision=None, approved=False):
     chunks, warnings = extract(name, data)
@@ -150,15 +144,20 @@ def source_from_bytes(name, data, source_id, kind, document_id, record_id=None,
             elif re.search(r'product\s+event\s+summary(?:\s+report)?',start,re.I):document_id='PESR'
             else:raise ValueError('Choose a Detailed Event Report or Product Event Summary Report for this event.')
         if document_id=='DER':
-            # Compact PDF layout padding without discarding dates, fields or history.
-            # Page locators and every substantive line remain in the source snapshot.
             compact=[]
             for c in chunks:
                 lines=[re.sub(r'[ \t]+',' ',line).strip() for line in c.text.splitlines()]
                 text='\n'.join(line for line in lines if line and line not in {'Global Complaint Handling','Medtronic Confidential'})
                 if text:compact.append(c.model_copy(update={'text':text}))
             chunks=compact
-        verify_record(chunks, record_id, document_id)
+        if document_id == 'ATTACHMENT':
+            if not record_id or not re.fullmatch(r'[A-Za-z0-9_-]{3,40}', record_id):
+                raise ValueError('An incoming attachment needs its selected GCH event ID.')
+            labels = re.findall(r'\b(?:event\s+id|product\s+event(?:\s+id)?)\s*[:#=]\s*([A-Za-z0-9_-]+)', '\n'.join(c.text for c in chunks), re.I)
+            if any(value != record_id and not (record_id.isdigit() and value.isdigit() and int(value) == int(record_id)) for value in labels):
+                raise ValueError('This attachment labels a different event ID. Confirm the correct attachment with your trainer.')
+        else:
+            verify_record(chunks, record_id, document_id)
     return EvidenceSource(id=source_id, kind=kind, name=Path(name).name,
         document_id=document_id, record_id=record_id, revision=revision,
         approved_revision=approved, file_sha256=hashlib.sha256(data).hexdigest(),

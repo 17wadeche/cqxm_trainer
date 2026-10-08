@@ -138,6 +138,7 @@ def validation_issues(error, expected):
         return issues
     message=str(error)
     mappings=[
+        ('narrative: assessment requires event and incoming attachment evidence','missing_incoming_citations','For narrative, cite both the saved event and the incoming attachment information. Use not_assessable if the comparison cannot be established.'),
         ('consistency: assessment requires event and MDR evidence','missing_cross_record_citations','Cite both primary event-record evidence and linked MDR evidence for a cross-record assessment. Use not_assessable when either side is unavailable.'),
         ('Duplicate check IDs','checklist_coverage','Return each expected check ID exactly once: '+', '.join(expected)+'.'),
         ('The review must cover','checklist_coverage','Return each expected check ID exactly once: '+', '.join(expected)+'.'),

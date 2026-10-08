@@ -1,4 +1,3 @@
-"""Chrome starts this stdio helper automatically; it has no app window or port."""
 import json
 import os
 from pathlib import Path
@@ -9,18 +8,14 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
-
 from app import Application, checked_text, file_payload
 from config import ROOT, PROCEDURES, DEFAULT_MODEL, DEFAULT_AUTH, ENVIRONMENT, VERSION, BUNDLED_PROCEDURES, data_directory
 from ingest import source_from_bytes
 from mdt import ProviderError, probe_connection
 from token_store import TokenStore
-
 MAX_IN = 30 * 1024 * 1024
 MAX_OUT = 900 * 1024
 HOST_NAME = 'com.gch.check_my_work'
-
-
 def read_exact(stream, length):
     parts = bytearray()
     while len(parts) < length:
@@ -29,8 +24,6 @@ def read_exact(stream, length):
             raise EOFError()
         parts.extend(value)
     return bytes(parts)
-
-
 def read_message(stream):
     prefix = stream.read(4)
     if not prefix:
@@ -44,15 +37,11 @@ def read_message(stream):
     if not isinstance(message, dict):
         raise ValueError('Expected an object')
     return message
-
-
 def encode_message(value):
     raw = json.dumps(value, ensure_ascii=False).encode('utf-8')
     if len(raw) > MAX_OUT:
         raise ValueError('Response too large')
     return struct.pack('=I', len(raw)) + raw
-
-
 class NativeService:
     def __init__(self, directory, provider_factory=None, token_store=None, *, bundled_directory=BUNDLED_PROCEDURES):
         kwargs = {'bundled_directory':bundled_directory}
@@ -68,7 +57,6 @@ class NativeService:
             self.app.connection['token'] = self.vault.load()
         self.lock = threading.RLock()
         self.saved = {}
-
     def status(self):
         sources = self.app.repo.catalog()
         return {'version':VERSION, 'token_present': bool(self.app.connection['token']),
@@ -81,14 +69,12 @@ class NativeService:
                 'environment':ENVIRONMENT,
                 'downloads': str(self.app.downloads),
                 'expected_procedures': [{'id': d, 'name': n} for d, n in PROCEDURES]}
-
     def ready(self):
         state = self.status()
         if not state['token_present']:
             raise ValueError('Enter your MDT-GPT token to continue.')
         if state['missing_procedures']:
             raise ValueError('Your trainer needs to add the six training procedures before you can check your work.')
-
     def verify_token(self, data):
         token = checked_text(data.get('token'), 'your MDT-GPT token', 8192)
         if '\r' in token or '\n' in token:
@@ -107,7 +93,6 @@ class NativeService:
             cfg.update(token=token, tested=True, environment=environment, **result)
             self.app.persist_preferences()
         return self.status()
-
     def job_status(self, job_id):
         job = self.app.get_job(job_id)
         result = {k:job[k] for k in ['id','record_id','status','progress','message','error']}
@@ -124,7 +109,6 @@ class NativeService:
                     origin = self.app.directory/'reports'/job_id/'review.docx'
                     self.app.downloads.mkdir(parents=True, exist_ok=True)
                     target = self.app.downloads/f"GCH_Review_{job['record_id']}_{job_id[:8]}.docx"
-                    # Unique report name; exclusive create never overwrites another file.
                     with target.open('xb') as output, origin.open('rb') as source:
                         shutil.copyfileobj(source, output)
                     self.saved[job_id] = target
@@ -132,7 +116,6 @@ class NativeService:
             findings = job['result']['review']['findings']
             result['needs_evidence'] = sum(f['assessment']=='not_assessable' for f in findings)
         return result
-
     def dispatch(self, method, data):
         if not isinstance(data, dict):
             raise ValueError('Invalid request')
@@ -191,6 +174,9 @@ class NativeService:
             self.ready()
             job = self.app.capture_complete(data.get('capture_id'), data)
             return {'id':job['id']}
+        if method == 'capture_attachment':
+            self.ready()
+            return self.app.capture_attachment(data.get('capture_id'), data)
         if method == 'job':
             return self.job_status(checked_text(data.get('id'), 'the review ID', 40))
         if method == 'cancel_job':
@@ -209,22 +195,16 @@ class NativeService:
             os.startfile(str(path))
             return {'ok':True}
         raise ValueError('Unknown command')
-
     def close(self):
         for job in self.app.jobs.values():
             job['cancelled'].set()
         self.app.connection['token'] = ''
         self.app.pool.shutdown(wait=True, cancel_futures=True)
         self.app.repo.db.close()
-
-
 def allowed_origin(origin):
     manifest = json.loads((ROOT/'native_config.json').read_text(encoding='utf-8'))
     return origin == 'chrome-extension://' + manifest['extension_id'] + '/'
-
-
 def main():
-    # Chrome supplies the extension origin. A website cannot launch the helper.
     if len(sys.argv) < 2 or not allowed_origin(sys.argv[1]):
         return 1
     if os.name == 'nt':
@@ -264,7 +244,5 @@ def main():
         pool.shutdown(wait=True, cancel_futures=False)
         service.close()
     return 0
-
-
 if __name__ == '__main__':
     raise SystemExit(main())

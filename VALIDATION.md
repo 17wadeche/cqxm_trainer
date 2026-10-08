@@ -1,4 +1,14 @@
-# Validation record — 30 September 2026 — v0.6.0
+# Validation record
+
+## 8 October 2026 — v0.7.0
+
+All **141 Python tests and 44 JavaScript tests passed (185 total)**. New synthetic checks exercise incoming and forwarded emails, RTF/HTML/CSV/spreadsheet/slide/OpenDocument/ZIP text extraction; event association without an ID in patient correspondence; rejection of explicitly mismatched event IDs; bounded native download paths, freshness and duplicate checks; attachment evidence in model packets; required citations from both the event and incoming information for narrative; unreadable-file coverage; and the complete native-helper flow through Word creation and saving.
+
+Chrome fixtures exercise the supplied SAP attachment Name/Type identifiers, exclusion of images/movies, row-specific links, first/next-page collection before event export, transfer limitations, unsupported pagination and cancellation. Three public example MSG files from the upstream msg-extractor repository were also successfully parsed into located headers and body text; their contents were not sent to a provider or added to this repository. `pip check` passed.
+
+The shorter feedback instructions and schema targets are implemented; generated wording was tested through mocked responses, not a live model. No live GCH/MDT-GPT, Windows registration, or browser attachment-download run is claimed. The screenshot does not reveal the collapsed link implementation or full footer controls. Validate an approved training event with attachments on multiple pages in the target environment, including a known incoming/record discrepancy and an unreadable file. Older DOC/XLS/PPT conversion additionally needs LibreOffice or exported text-based copies; audio needs transcripts and scans need OCR. Unsupported or unreadable content remains an explicit limit rather than silently becoming assessed evidence.
+
+## 30 September 2026 — v0.6.0
 
 ## Evidence accuracy regression scope in 0.6.0
 

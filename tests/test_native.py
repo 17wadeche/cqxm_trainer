@@ -80,7 +80,28 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(second['filename'],state['filename'])
         self.assertEqual(len(list(self.service.app.downloads.glob('*.docx'))),1)
         self.assertNotIn('result',state)  # Large evidence never travels through native replies.
-
+    def test_incoming_capture_flows_through_native_helper_to_cited_word_report(self):
+        from test_attachments import IncomingProvider, INCOMING
+        self.configure()
+        self.service.app.engine.provider_factory=IncomingProvider
+        lease=self.service.dispatch('capture_start',{'record_id':'TRAIN-001','stage':'Intake'})
+        incoming=self.service.app.downloads/'patient.txt';incoming.write_bytes(INCOMING)
+        self.service.dispatch('capture_attachment',{'capture_id':lease['capture_id'],'path':str(incoming)})
+        report=self.service.app.downloads/'PESR.txt';report.write_bytes(PESR)
+        job=self.service.dispatch('capture_complete',{'capture_id':lease['capture_id'],'path':str(report),'attachment_limits':[]})
+        deadline=time.monotonic()+10
+        while time.monotonic()<deadline:
+            status=self.service.dispatch('job',job)
+            if status['status'] in {'ready','failed'}:break
+            time.sleep(.01)
+        self.assertEqual(status['status'],'ready',status)
+        output=self.directory/'reports'/job['id']
+        evidence=json.loads((output/'evidence.json').read_text())
+        incoming_source=next(s for s in evidence['sources'] if s['document_id']=='ATTACHMENT')
+        review=json.loads((output/'review.json').read_text())
+        narrative=next(f for f in review['findings'] if f['check_id']=='narrative')
+        self.assertTrue(any(ref['source_id']==incoming_source['id'] for ref in narrative['record_evidence']))
+        self.assertTrue((self.service.app.downloads/status['filename']).is_file())
     def test_open_report_cannot_open_an_arbitrary_path(self):
         with self.assertRaisesRegex(ValueError,'no longer available'):
             self.service.dispatch('open_report',{'id':'../../../other.exe'})

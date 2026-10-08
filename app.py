@@ -20,6 +20,8 @@ import webbrowser
 from zipfile import ZipFile, ZIP_DEFLATED
 from config import DEFAULT_MODEL, DEFAULT_AUTH, SETTINGS_VERSION, PROVIDER, ENVIRONMENT, ENDPOINT, PORT, ROOT, VERSION, MAX_FILE_BYTES, MAX_REQUEST_BYTES, PROCEDURES, BUNDLED_PROCEDURES, data_directory
 from bundled_procedures import load_defaults
+from config import MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, CAPTURE_SECONDS
+from attachment_text import MEDIA_EXTENSIONS
 from engine import ReviewEngine, demo_report
 from ingest import source_from_bytes
 from mdt import MDTClient, ProviderError, probe_connection
@@ -107,7 +109,7 @@ class Application:
                 raise ValueError("Two reviews are already running. Wait or cancel a review before starting another.")
             self.jobs[job_id] = job
         return job
-    def start_review(self, record_id, stage, policy_selection, files, capture_id=None):
+    def start_review(self, record_id, stage, policy_selection, files, capture_id=None, attachment_limits=None):
         self.ensure_ready()
         record_id = checked_text(record_id, 'the GCH record ID', 40)
         if not re.fullmatch(r'[A-Za-z0-9_-]{3,40}', record_id):
@@ -115,8 +117,10 @@ class Application:
         stage = checked_text(stage, 'the record stage', 120)
         policy_selection = checked_text(policy_selection, 'the procedure revision basis', 500)
         kinds=[f[0] for f in files]
-        if len(files) not in {1,2} or sum(k in {'PRIMARY','PESR','DER'} for k in kinds)!=1 or any(k not in {'PRIMARY','PESR','DER','MDR'} for k in kinds) or kinds.count('MDR')>1:
-            raise ValueError('Upload one Detailed Event Report or PESR and optionally one matching MDR.')
+        if not 1 <= len(files) <= MAX_ATTACHMENTS+2 or sum(k in {'PRIMARY','PESR','DER'} for k in kinds)!=1 or any(k not in {'PRIMARY','PESR','DER','MDR','ATTACHMENT'} for k in kinds) or kinds.count('MDR')>1 or kinds.count('ATTACHMENT')>MAX_ATTACHMENTS:
+            raise ValueError('Upload one event report, optionally one MDR, and up to 100 incoming attachments.')
+        if sum(len(f[2]) for f in files if f[0]=='ATTACHMENT') > MAX_ATTACHMENT_BYTES:
+            raise ValueError('Incoming attachments exceed the 200 MB total limit.')
         job = self._new_job(record_id)
         connection = dict(self.connection)
         def progress(message, percent=None):
@@ -129,7 +133,7 @@ class Application:
                 with self.lock:
                     job.update(status='running', progress=5, message='Extracting the saved record')
                 result = self.engine.run(job['id'], record_id, stage, policy_selection, files,
-                                         connection, progress, job['cancelled'])
+                                         connection, progress, job['cancelled'], attachment_limits=attachment_limits)
                 if job['cancelled'].is_set():
                     raise InterruptedError()
                 with self.lock:
@@ -169,33 +173,57 @@ class Application:
         stage = checked_text(data.get('stage'), 'the record stage', 120)
         with self.lock:
             now = time.time()
-            self.captures = {k: v for k, v in self.captures.items() if now-v['started'] < 180}
+            self.captures = {k: v for k, v in self.captures.items() if now-v['started'] < CAPTURE_SECONDS}
             if self.captures:
                 raise ValueError('Another GCH capture is active. Finish or cancel it before starting another.')
             cid = str(uuid4())
-            self.captures[cid] = {'record_id': record_id, 'stage': stage, 'started': now, 'claimed': False}
-        return {'capture_id': cid, 'expires_in': 180}
+            self.captures[cid] = {'record_id': record_id, 'stage': stage, 'started': now, 'claimed': False, 'attachments': [], 'paths': set()}
+        return {'capture_id': cid, 'expires_in': CAPTURE_SECONDS}
+    def capture_attachment(self, cid, data):
+        with self.lock:
+            cap = self.captures.get(cid)
+            if not cap or cap['claimed'] or time.time()-cap['started'] > CAPTURE_SECONDS:
+                raise ValueError('The capture expired. Start Check my work again.')
+            path = self.capture_path(cap, data.get('path'), attachment=True)
+            if path in cap['paths']:
+                raise ValueError('This attachment download was already added.')
+            if len(cap['attachments']) >= MAX_ATTACHMENTS:
+                raise ValueError('The event exceeds the 100-attachment limit. Review the remaining files with your trainer.')
+            payload = path.read_bytes()
+            if len(payload)>MAX_FILE_BYTES or sum(len(f[2]) for f in cap['attachments'])+len(payload)>MAX_ATTACHMENT_BYTES:
+                raise ValueError('The attachments exceed the file-size limit.')
+            cap['attachments'].append(('ATTACHMENT', path.name, payload))
+            cap['paths'].add(path)
+        return {'added': True}
+    def capture_path(self, cap, raw_path, *, attachment=False):
+        path = Path(checked_text(raw_path, 'the downloaded file path', 1024)).expanduser().resolve()
+        try:
+            path.relative_to(self.downloads)
+        except ValueError:
+            raise ValueError('The export is outside the configured Downloads folder. Update the folder in Documents & settings.') from None
+        if not path.is_file() or (not attachment and path.suffix.lower() not in {'.pdf', '.docx', '.txt'}):
+            raise ValueError('The downloaded export is not a supported report file.')
+        if attachment and path.suffix.lower() in MEDIA_EXTENSIONS:
+            raise ValueError('Images and movies are excluded from text review.')
+        stat = path.stat()
+        if stat.st_mtime < cap['started']-3 or not 0 < stat.st_size <= MAX_FILE_BYTES:
+            raise ValueError('This is not a fresh export within the file-size limit. Generate the report again.')
+        return path
     def capture_complete(self, cid, data):
         with self.lock:
             cap = self.captures.get(cid)
-            if not cap or time.time()-cap['started'] > 180 or cap['claimed']:
+            if not cap or time.time()-cap['started'] > CAPTURE_SECONDS or cap['claimed']:
                 raise ValueError('The capture expired or has already been processed. Start Check my Work again.')
-            path = Path(checked_text(data.get('path'), 'the downloaded file path', 1024)).expanduser().resolve()
-            try:
-                path.relative_to(self.downloads)
-            except ValueError:
-                raise ValueError('The export is outside the configured Downloads folder. Use Choose exported report in the extension or update the folder in Connection.') from None
-            if not path.is_file() or path.suffix.lower() not in {'.pdf', '.docx', '.txt'}:
-                raise ValueError('The downloaded export is not a supported report file.')
-            stat = path.stat()
-            if stat.st_mtime < cap['started']-3 or stat.st_size > MAX_FILE_BYTES:
-                raise ValueError('This is not a fresh export within the file-size limit. Generate the report again.')
+            path = self.capture_path(cap, data.get('path'))
             payload = path.read_bytes()
             if len(payload) > MAX_FILE_BYTES:
                 raise ValueError('The report exceeds 20 MB.')
             cap['claimed'] = True
         try:
-            return self.start_review(cap['record_id'], cap['stage'], 'Uploaded revisions selected by the training owner', [('PRIMARY', path.name, payload)], cid)
+            limits = data.get('attachment_limits', [])
+            if not isinstance(limits, list) or len(limits)>MAX_ATTACHMENTS+5 or any(not isinstance(v, str) or len(v)>500 for v in limits):
+                raise ValueError('Invalid attachment coverage.')
+            return self.start_review(cap['record_id'], cap['stage'], 'Uploaded revisions selected by the training owner', [('PRIMARY', path.name, payload)]+cap['attachments'], cid, limits)
         finally:
             with self.lock:
                 self.captures.pop(cid, None)
@@ -359,8 +387,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply({'source': {'id': source.id, 'name': source.name}, 'warnings': warnings, 'procedures': self.app.repo.catalog()})
             elif path == '/api/reviews':
                 raw_files = data.get('files')
-                if not isinstance(raw_files, list) or not 1 <= len(raw_files) <= 2:
-                    raise ValueError('Provide a Detailed Event Report or PESR and optionally a matching MDR.')
+                if not isinstance(raw_files, list) or not 1 <= len(raw_files) <= MAX_ATTACHMENTS+2:
+                    raise ValueError('Provide one event report and its incoming attachments.')
                 if not all(isinstance(value, dict) for value in raw_files):
                     raise ValueError('Provide valid file objects.')
                 files = [(value.get('kind'), *file_payload(value)) for value in raw_files]

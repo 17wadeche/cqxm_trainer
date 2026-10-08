@@ -1,4 +1,4 @@
-import {recordContext, actionInFrame} from './gch-dom.mjs';
+import {recordContext, actionInFrame, attachmentsInFrame} from './gch-dom.mjs';
 const HOST='com.gch.check_my_work', GCH='https://crm.medtronic.com/';
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 let nativePort=null, sequence=0, startBusy=false, downloadQueue=Promise.resolve();
@@ -112,6 +112,74 @@ async function clickUnique(tabIds,label,captureId=null){
   if(!result[0]?.result?.clicked)throw new Error('The GCH screen changed. Wait for it to finish loading and try again.');
   return true;
 }
+async function attachmentTable(tabId){
+  const frameIds=await permittedFrames(tabId);
+  const frames=frameIds.length?await chrome.scripting.executeScript({target:{tabId,frameIds},func:attachmentsInFrame,args:['scan']}):[];
+  const found=frames.filter(frame=>frame.result?.found);
+  if(found.length>1)throw new Error('More than one attachment table is visible. Open one event and try again.');
+  return found[0]||null;
+}
+async function attachmentCommand(active,frame,command,key=null){
+  const current=await capture();if(current?.captureId!==active.captureId)return false;
+  const ctx=await context(await chrome.tabs.get(active.tabId));
+  if(ctx.recordId!==active.recordId)throw new Error('The selected event changed while collecting attachments. Start again on the correct event.');
+  const result=await chrome.scripting.executeScript({target:{tabId:active.tabId,frameIds:[frame.frameId]},func:attachmentsInFrame,args:[command,key]});
+  if(!result[0]?.result?.clicked)throw new Error(result[0]?.result?.error||'The attachment table changed. Try again.');
+  return true;
+}
+async function collectAttachments(active){
+  const limits=[],seen=new Set(),pages=new Set();
+  let frame=await attachmentTable(active.tabId);
+  if(!frame&&await clickUnique(active.tabId,'Attachments',active.captureId)){
+    for(let i=0;i<20&&!frame;i++){await delay(250);frame=await attachmentTable(active.tabId);}
+  }
+  if(!frame)limits.push('Attachment section was unavailable; incoming files could not be collected.');
+  if(frame?.result.first){
+    const previous=frame.result.pageKey;
+    if(!await attachmentCommand(active,frame,'first'))return false;
+    let changed=false;
+    for(let i=0;i<40;i++){await delay(250);frame=await attachmentTable(active.tabId);if(frame&&!frame.result.first){changed=true;break;}if(frame&&frame.result.pageKey!==previous){changed=true;break;}}
+    if(!changed)throw new Error('The first attachment page did not load. Start again after GCH finishes loading.');
+  }
+  while(frame){
+    const page=frame.result;
+    if(page.error)throw new Error(page.error);
+    if(page.coverageUnknown)limits.push('Attachment pagination was unavailable; only the visible attachment rows were collected.');
+    if(pages.has(page.pageKey))throw new Error('Attachment pagination repeated a page. The complete list could not be collected.');
+    pages.add(page.pageKey);
+    for(const row of page.rows){
+      if(row.excluded)continue;
+      if(seen.has(row.key))throw new Error('Duplicate attachment rows cannot be identified uniquely. Ask your trainer to check the table.');
+      if(seen.size>=100)throw new Error('This event exceeds 100 text attachments. Review the remaining files with your trainer.');
+      seen.add(row.key);
+      if(!row.downloadable){limits.push('Incoming attachment '+row.name.slice(0,180)+' has no unique download link.');continue;}
+      const current=await capture();if(current?.captureId!==active.captureId)return false;
+      await chrome.storage.session.set({capture:{...current,role:'attachment',downloadId:null,requestedDownload:false,processing:false,
+        currentAttachment:{name:row.name.slice(0,240),started:Date.now(),done:false,error:null}}});
+      await update(active.tabId,{message:'Reading incoming file '+seen.size+'…'});
+      if(!await attachmentCommand(active,frame,'download',row.key))return false;
+      let result=null;
+      for(let i=0;i<120;i++){
+        const latest=await capture();if(latest?.captureId!==active.captureId)return false;
+        if(latest.currentAttachment?.done){result=latest.currentAttachment;break;}
+        await delay(250);
+      }
+      if(!result)throw new Error('Incoming attachment '+row.name.slice(0,180)+' did not download. Use its Download button, then try Check my work again.');
+      if(result.error)limits.push('Incoming attachment '+row.name.slice(0,180)+' could not be collected: '+result.error.slice(0,220));
+    }
+    if(page.paginationUnknown)throw new Error('The attachment page controls are unsupported. Ask your trainer to check for additional pages.');
+    if(!page.next)break;
+    if(!await attachmentCommand(active,frame,'next'))return false;
+    let next=null;
+    for(let i=0;i<40;i++){await delay(250);next=await attachmentTable(active.tabId);if(next&&next.result.pageKey!==page.pageKey)break;}
+    if(!next||next.result.pageKey===page.pageKey)throw new Error('The next attachment page did not load. Wait for GCH and try again.');
+    frame=next;
+  }
+  if(frame&&seen.size===0)limits.push('Attachment section contained no text files; incoming information could not be compared.');
+  const current=await capture();if(current?.captureId!==active.captureId)return false;
+  await chrome.storage.session.set({capture:{...current,role:'report',currentAttachment:null,downloadId:null,requestedDownload:false,processing:false,attachmentLimits:limits,reportStarted:Date.now()}});
+  return true;
+}
 async function start(tab){
   if(startBusy)throw new Error('A check is starting. Please wait.');
   startBusy=true;
@@ -129,8 +197,11 @@ async function start(tab){
     const lease=await native('capture_start',{record_id:ctx.recordId,stage:ctx.stage});
     if((await state(tab.id)).runId!==runId){await native('capture_cancel',{capture_id:lease.capture_id});return state(tab.id);}
     const existingTabIds=(await chrome.tabs.query({url:GCH+'*'})).map(t=>t.id);
-    await chrome.storage.session.set({capture:{captureId:lease.capture_id,tabId:tab.id,recordId:ctx.recordId,existingTabIds,started:Date.now(),downloadId:null,processing:false,requestedDownload:false}});
-    await chrome.alarms.create('capture-expiry',{when:Date.now()+170000});
+    const activeCapture={captureId:lease.capture_id,tabId:tab.id,recordId:ctx.recordId,existingTabIds,started:Date.now(),downloadId:null,processing:false,requestedDownload:false,role:'collecting',attachmentDownloadIds:[]};
+    await chrome.storage.session.set({capture:activeCapture});
+    await chrome.alarms.create('capture-expiry',{when:Date.now()+((lease.expires_in||900)-10)*1000});
+    await update(tab.id,{phase:'exporting',message:'Getting the incoming information…',progress:3});
+    if(!await collectAttachments(activeCapture))return state(tab.id);
     await update(tab.id,{phase:'exporting',message:'Getting your saved GCH report…',progress:5});
     const printed=await clickUnique(tab.id,'Print',lease.capture_id);
     if((await capture())?.captureId!==lease.capture_id)return state(tab.id);
@@ -157,20 +228,41 @@ function fromGCH(item){return[item.url,item.finalUrl,item.referrer].some(value=>
 async function consider(item){
   const active=await capture();
   if(!active||active.processing||!fromGCH(item)||!Number.isFinite(Date.parse(item.startTime))||Date.parse(item.startTime)<active.started-2000)return;
+  if(active.attachmentDownloadIds?.includes(item.id))return;
+  if(active.role==='collecting')return;
+  if(active.role==='attachment'){
+    const expected=active.currentAttachment;
+    if(!expected||expected.done||Date.parse(item.startTime)<expected.started-1000)return;
+    const filename=(item.filename||'').split(/[\\/]/).pop().replace(/ \(\d+\)(?=\.[^.]+$)/,'').toLowerCase();
+    const name=expected.name.toLowerCase();
+    if(/\.[a-z0-9]{2,5}$/i.test(name)&&filename!==name)return;
+    if(active.downloadId!==null&&active.downloadId!==item.id)throw new Error('More than one incoming file downloaded for the selected attachment.');
+    active.downloadId=item.id;await chrome.storage.session.set({capture:active});
+    if(item.state!=='complete')return;
+    active.processing=true;await chrome.storage.session.set({capture:active});
+    let error=null;
+    try{await native('capture_attachment',{capture_id:active.captureId,path:item.filename});}
+    catch(exc){error=exc.message;}
+    const latest=await capture();if(latest?.captureId!==active.captureId)return;
+    latest.attachmentDownloadIds.push(item.id);latest.processing=false;
+    latest.currentAttachment={...expected,done:true,error};
+    await chrome.storage.session.set({capture:latest});return;
+  }
+  if(Date.parse(item.startTime)<(active.reportStarted||active.started)-1000)return;
   if(!(/\.(pdf|docx|txt)$/i.test(item.filename||'')||/pdf|wordprocessingml|text\/plain/i.test(item.mime||'')))return;
   if(active.downloadId!==null&&active.downloadId!==item.id){await fail(active.tabId,new Error('More than one report downloaded. Please finish other downloads and check this record again.'));return;}
   active.downloadId=item.id;await chrome.storage.session.set({capture:active});
   if(item.state!=='complete')return;
   active.processing=true;await chrome.storage.session.set({capture:active});
   try{
-    const job=await native('capture_complete',{capture_id:active.captureId,path:item.filename});
+    const job=await native('capture_complete',{capture_id:active.captureId,path:item.filename,attachment_limits:active.attachmentLimits||[]});
     if((await capture())?.captureId!==active.captureId){await native('cancel_job',{id:job.id});return;}
     await chrome.storage.session.remove('capture');await chrome.alarms.clear('capture-expiry');
-    await update(active.tabId,{phase:'reviewing',jobId:job.id,progress:10,message:'Checking your work against the training procedures…'});
+    await update(active.tabId,{phase:'reviewing',jobId:job.id,progress:10,message:'Comparing your record with incoming information and procedures…'});
     void follow(active.tabId,job.id);
   }catch(error){await fail(active.tabId,error);}
 }
-function enqueue(item){downloadQueue=downloadQueue.then(()=>consider(item)).catch(()=>{});}
+function enqueue(item){downloadQueue=downloadQueue.then(()=>consider(item)).catch(async error=>{const active=await capture();if(active)await fail(active.tabId,error);});}
 chrome.downloads.onCreated.addListener(enqueue);
 chrome.downloads.onChanged.addListener(change=>{
   if(change.state?.current==='complete')chrome.downloads.search({id:change.id}).then(items=>items[0]&&enqueue(items[0])).catch(()=>{});
@@ -180,9 +272,12 @@ chrome.downloads.onChanged.addListener(change=>{
 // Native print dialogs, blob viewers and POST-only exports are not guessed at.
 chrome.webRequest.onHeadersReceived.addListener(details=>{
   const contentType=details.responseHeaders?.find(h=>h.name.toLowerCase()==='content-type')?.value||'';
-  if(details.method!=='GET'||!['main_frame','sub_frame'].includes(details.type)||!/application\/(pdf|vnd.openxmlformats-officedocument.wordprocessingml.document)/i.test(contentType))return;
+  if(details.method!=='GET'||!['main_frame','sub_frame'].includes(details.type)||!/^(application\/(pdf|vnd\.|msword|rtf)|text\/(plain|csv|rtf)|message\/rfc822)/i.test(contentType))return;
+  const requestCapture=capture();
   setTimeout(async()=>{
-    const active=await capture();if(!active||active.downloadId!==null||active.requestedDownload||active.processing)return;
+    const active=await capture();if(!active||!['report','attachment'].includes(active.role)||active.currentAttachment?.done||active.downloadId!==null||active.requestedDownload||active.processing)return;
+    const original=await requestCapture;
+    if(original?.captureId!==active.captureId||original.role!==active.role||original.currentAttachment?.started!==active.currentAttachment?.started)return;
     const tab=await chrome.tabs.get(details.tabId).catch(()=>null);
     const related=await reportTabs(active);
     const nav=await navigationInfo(details.tabId);

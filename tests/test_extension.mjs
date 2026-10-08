@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
-import {recordContext, actionInFrame} from '../extension/gch-dom.mjs';
+import {recordContext, actionInFrame, attachmentsInFrame} from '../extension/gch-dom.mjs';
 
 function element(text, attrs={}) {
   return {innerText:text, textContent:text, title:attrs.title||'', value:'', disabled:!!attrs.disabled,
@@ -104,4 +104,50 @@ test('ambiguous Detailed Event Report rows are never clicked',()=>{
   page([a.selector,b.selector],'',[a.row,b.row]);
   assert.equal(actionInFrame('Detailed Event Report',true).clicked,false);
   assert.equal(a.selector.clicks+b.selector.clicks,0);
+});
+function attachmentPage(entries, controls=[], footerText='1-3 of 3') {
+  const table={id:'C27_W86_V87_Table_TableHeader'};
+  const cells=entries.map(({name,type='',links=1,metadata=''})=>{
+    const row={textContent:name+' '+type+' '+metadata,querySelector:()=>({textContent:type})};
+    const cell=element(name);cell.links=Array.from({length:links},()=>element(name));
+    cell.closest=selector=>selector==='table'?table:row;
+    cell.querySelectorAll=()=>cell.links;
+    return cell;
+  });
+  const footer={textContent:footerText,querySelectorAll:()=>controls};
+  globalThis.document={querySelectorAll:()=>cells,getElementById:id=>id==='C27_W86_V87_Table-footer'?footer:null};
+  globalThis.getComputedStyle=()=>({display:'block',visibility:'visible'});
+  return cells;
+}
+test('SAP attachment names and types exclude media and keep incoming text files',()=>{
+  attachmentPage([{name:'rep.msg',type:'Outlook message'},{name:'patient.pdf'},{name:'photo.jpg'},{name:'movie.mov'},{name:'scan',type:'image/png'},{name:'details.csv'}],[],'1-6 of 6');
+  const scan=attachmentsInFrame();
+  assert.equal(scan.found,true);
+  assert.deepEqual(scan.rows.filter(row=>!row.excluded).map(row=>row.name),['rep.msg','patient.pdf','details.csv']);
+});
+test('attachment download uses its own name cell rather than a broad matching label',()=>{
+  const cells=attachmentPage([{name:'rep.txt',metadata:'created yesterday'},{name:'rep.txt',metadata:'created today'}],[],'1-2 of 2');
+  const scan=attachmentsInFrame();
+  assert.equal(attachmentsInFrame('download',scan.rows[1].key).clicked,true);
+  assert.equal(cells[0].links[0].clicks,0);assert.equal(cells[1].links[0].clicks,1);
+});
+test('ambiguous and excluded attachment links are never clicked',()=>{
+  const cells=attachmentPage([{name:'rep.txt',links:2},{name:'photo.png'}],[],'1-2 of 2');
+  const scan=attachmentsInFrame();
+  for(const row of scan.rows)assert.match(attachmentsInFrame('download',row.key).error,/changed|more than one/);
+  assert.equal(cells.flatMap(cell=>cell.links).reduce((n,link)=>n+link.clicks,0),0);
+});
+test('attachment pagination targets only the table footer',()=>{
+  const next=element('',{title:'Next Page'}),first=element('',{title:'First Page'});
+  attachmentPage([{name:'rep.txt'}],[next,first],'11-20 of 30');
+  const scan=attachmentsInFrame();assert.equal(scan.next,true);assert.equal(scan.first,true);
+  assert.equal(attachmentsInFrame('next').clicked,true);assert.equal(next.clicks,1);assert.equal(first.clicks,0);
+});
+test('attachment pagination cannot silently stop when more rows exist',()=>{
+  attachmentPage([{name:'rep.txt'}],[],'1-10 of 30');
+  assert.match(attachmentsInFrame().error,/Additional attachment pages/);
+});
+test('attachment scan reports an unavailable table',()=>{
+  globalThis.document={querySelectorAll:()=>[]};
+  assert.deepEqual(attachmentsInFrame(),{found:false,rows:[]});
 });

@@ -36,12 +36,14 @@ async function fixture(options={}){
     scripting:{executeScript:async spec=>{
       assert.deepEqual(spec.target.frameIds,[0]);
       if(spec.func.name==='recordContext')return[{frameId:0,result:{recordIds:['708930960'],status:'Re-Open'}}];
+      if(spec.func.name==='attachmentsInFrame')return options.attachments?options.attachments(spec,chrome):[{frameId:0,result:{found:false,rows:[]}}];
       if(spec.args[1]){clicks.push(spec.args[0]);clickedTabs.push({label:spec.args[0],tabId:spec.target.tabId});}
       if(spec.args[0]==='Print'&&spec.args[1]&&options.onPrint)await options.onPrint({tabs,events:chrome});
       if(options.onScript)await options.onScript(spec);
       let count=spec.args[0]==='Detailed Event Report'&&options.summaryTabs&&!options.summaryTabs.includes(spec.target.tabId)?0:1;
       if(spec.args[0]==='Detailed Event Report'&&options.noDetailed)count=0;
       if(spec.args[0]==='Product Event Summary Report')count=options.noDetailed?1:0;
+      if(spec.args[0]==='Attachments')count=0;
       return[{frameId:0,result:{count,score:0,clicked:count>0&&!!spec.args[1]}}];
     }},
     downloads:{onCreated:event(),onChanged:event(),search:async()=>[],download:async data=>{calls.push({method:'chrome_download',data});return 9;}},
@@ -126,6 +128,63 @@ test('cancel during export handoff cancels the returned review and leaves the pa
 });
 
 const preview=(id=5,extra={})=>({id,url:'https://crm.medtronic.com/sap/bc/bsp/sap/bsp_wd_base/popup_test.htm',openerTabId:4,windowId:20,...extra});
+function incomingDownload(chrome,id,name){
+  chrome.downloads.onCreated.fire({id,url:'https://crm.medtronic.com/sap/'+name,filename:'C:\\Downloads\\'+name,mime:'text/plain',state:'complete',startTime:new Date().toISOString()});
+}
+test('all incoming files across attachment pages are added before the event export',async()=>{
+  let page=1,sequence=20;
+  const downloaded=[];
+  const pages=[
+    [{key:'rep',name:'rep.eml',excluded:false,downloadable:true},{key:'photo',name:'photo.png',excluded:true,downloadable:true}],
+    [{key:'patient',name:'patient.txt',excluded:false,downloadable:true}]
+  ];
+  const f=await fixture({attachments:(spec,chrome)=>{
+    const [command,key]=spec.args;
+    if(command==='scan')return[{frameId:0,result:{found:true,rows:pages[page],pageKey:'page-'+page,first:page>0,next:page<1}}];
+    if(command==='first')page=0;
+    if(command==='next')page++;
+    if(command==='download'){
+      const row=pages[page].find(row=>row.key===key);downloaded.push(row.name);incomingDownload(chrome,++sequence,row.name);
+    }
+    return[{frameId:0,result:{clicked:true}}];
+  }});
+  assert.equal((await f.send({type:'START'})).state.phase,'exporting');
+  assert.deepEqual(downloaded,['rep.eml','patient.txt']);
+  assert.equal(f.calls.filter(c=>c.method==='capture_attachment').length,2);
+  assert.deepEqual(f.clicks,['Print','Detailed Event Report']);
+  f.download();await f.until(()=>f.values['flow-4']?.phase==='done');
+  const complete=f.calls.find(c=>c.method==='capture_complete');
+  assert.deepEqual(complete.data.attachment_limits,[]);
+  assert.equal(f.calls.filter(c=>c.method==='capture_complete').length,1);
+});
+test('an attachment transfer failure is included in the review coverage',async()=>{
+  const f=await fixture({handler:method=>{if(method==='capture_attachment')throw new Error('The attachment exceeds 20 MB.');},
+    attachments:(spec,chrome)=>{
+      if(spec.args[0]==='scan')return[{frameId:0,result:{found:true,rows:[{key:'rep',name:'rep.txt',excluded:false,downloadable:true}],pageKey:'one',next:false,first:false}}];
+      incomingDownload(chrome,20,'rep.txt');return[{frameId:0,result:{clicked:true}}];
+    }});
+  await f.send({type:'START'});f.download();await f.until(()=>f.values['flow-4']?.phase==='done');
+  assert.match(f.calls.find(c=>c.method==='capture_complete').data.attachment_limits[0],/rep.txt.*20 MB/);
+});
+test('unrecognized attachment pagination stops before generating a partial review',async()=>{
+  const f=await fixture({attachments:()=>[{frameId:0,result:{found:true,rows:[],pageKey:'one',paginationUnknown:true}}]});
+  assert.equal((await f.send({type:'START'})).state.phase,'error');
+  assert.equal(f.clicks.includes('Print'),false);assert.equal(f.calls.some(c=>c.method==='capture_complete'),false);
+});
+test('cancelling attachment collection prevents the event export and review',async()=>{
+  let release;
+  const transfer=new Promise(resolve=>{release=resolve;});
+  const f=await fixture({handler:async method=>method==='capture_attachment'?await transfer:undefined,
+    attachments:(spec,chrome)=>{
+      if(spec.args[0]==='scan')return[{frameId:0,result:{found:true,rows:[{key:'rep',name:'rep.txt',excluded:false,downloadable:true}],pageKey:'one',next:false,first:false}}];
+      incomingDownload(chrome,20,'rep.txt');return[{frameId:0,result:{clicked:true}}];
+    }});
+  const starting=f.send({type:'START'});
+  await f.until(()=>f.calls.some(c=>c.method==='capture_attachment'));
+  await f.send({type:'CANCEL'});release({added:true});await starting;
+  assert.equal(f.values['flow-4'].phase,'idle');assert.equal(f.clicks.includes('Print'),false);
+  assert.equal(f.calls.some(c=>c.method==='capture_complete'),false);
+});
 test('PESR is used only when the Detailed Event Report is absent',async()=>{
   const f=await fixture({noDetailed:true});
   assert.equal((await f.send({type:'START'})).state.phase,'exporting');

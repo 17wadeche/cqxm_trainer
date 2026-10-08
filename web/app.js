@@ -107,6 +107,7 @@ $('review-form').addEventListener('submit',async e=>{
   e.preventDefault();await busy($('check-button'),'Starting review…',async()=>{
     const files=[await fileData($('pesr-file').files[0],'PRIMARY')];
     if($('mdr-file').files[0])files.push(await fileData($('mdr-file').files[0],'MDR'));
+    for(const file of $('attachment-files').files)files.push(await fileData(file,'ATTACHMENT'));
     const job=await api('/api/reviews',{record_id:$('record-id').value.trim(),stage:$('stage').value,policy_selection:$('policy-basis').value,files});
     await follow(job);
   });
