@@ -1,4 +1,3 @@
-"""Shared, deterministic Word layout helpers."""
 from math import ceil
 from docx import Document
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
@@ -6,8 +5,6 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
-
-
 def document(title: str, subtitle: str):
     doc = Document()
     sec = doc.sections[0]
@@ -47,8 +44,6 @@ def document(title: str, subtitle: str):
     doc.add_paragraph(title, "Title")
     doc.add_paragraph(subtitle, "Subtitle")
     return doc
-
-
 def table(doc, headers, rows, widths, font_size=9.5, center_cols=(), allow_split=False):
     t = doc.add_table(rows=1, cols=len(headers))
     t.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -65,8 +60,6 @@ def table(doc, headers, rows, widths, font_size=9.5, center_cols=(), allow_split
     tblpr.append(borders)
     for i, values in enumerate([headers] + list(rows)):
         row = t.rows[0] if i == 0 else t.add_row()
-        # Keep ordinary findings on one page. Permit exceptionally long prose
-        # to flow across pages instead of forcing an oversized unsplittable row.
         estimated_lines = max(sum(max(1, ceil(len(line) / max(1, (width-.12)*72/(font_size*.5))))
                                   for line in str(value).split('\n'))
                               for value, width in zip(values, widths))
@@ -106,8 +99,6 @@ def table(doc, headers, rows, widths, font_size=9.5, center_cols=(), allow_split
     spacer.paragraph_format.space_after = Pt(3)
     spacer.paragraph_format.keep_with_next = True
     return t
-
-
 def body(doc, text, bold_lead=None):
     p = doc.add_paragraph()
     if bold_lead and text.startswith(bold_lead):

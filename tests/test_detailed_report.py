@@ -1,10 +1,8 @@
-"""Synthetic DER parsing, source identity, heading routing and full review flow."""
 import json
 from pathlib import Path
 import tempfile
 import threading
 import unittest
-
 from config import DEFAULT_MODEL, PROCEDURES, GROUPS
 from engine import ReviewEngine
 from ingest import source_from_bytes, verify_record
@@ -12,15 +10,11 @@ from models import Chunk, EvidenceSource, EvidenceManifest, Review, extracted_di
 from record_sections import RecordIndex, embedded_mdrs
 from repository import Repository
 from test_app import MockProvider
-
-
 def source(pages, offset=0):
     chunks=[Chunk(id=f'c{i}',locator=f'PDF page {i+offset}, part 1',text=t) for i,t in enumerate(pages,1)]
     return EvidenceSource(id='der-test',kind='record',name='Synthetic DER.pdf',document_id='DER',
         record_id='123456789',revision=None,approved_revision=False,file_sha256='a'*64,
         extracted_text_sha256=extracted_digest(chunks),chunks=chunks)
-
-
 PAGES=[
     'Detailed Event Report\nProduct Event Transaction ID : 123456789\nSYNTHETIC ONLY',
     'Event Summary\nEvent ID 123456789\nEvent Status Re-Open\nProduct returned after initial closure.',
@@ -34,25 +28,20 @@ PAGES=[
     'MEDWATCH\nMfr Report # 1111111-2026-01234\nG. Type of Report\n[ ] Initial\n[X] Follow-up',
     'Product Analysis Report\nAnalysis ID: 999\nReturned segment analysis and dated conclusions.',
 ]
-
-
 class DetailedReportTests(unittest.TestCase):
     def test_primary_auto_detects_der_and_pesr(self):
         for title,expected in [('Detailed Event Report','DER'),('Product Event Summary Report','PESR')]:
             s,_=source_from_bytes('report.txt',(title+'\nEvent ID: 123456789\nSynthetic complete report.').encode(),'r','record','PRIMARY','123456789')
             self.assertEqual(s.document_id,expected)
-
     def test_wrong_record_and_unrecognized_primary_are_rejected(self):
         for text in ['Detailed Event Report\nEvent ID 123456789\nEvent ID 987654321',
                      'Random document\nEvent ID 123456789\nUnrelated source material.']:
             with self.assertRaises(ValueError):source_from_bytes('test.txt',text.encode(),'r','record','PRIMARY','123456789')
-
     def test_blank_duplicate_label_and_zero_padded_line_item_are_supported(self):
         chunks=source([PAGES[0],'Duplicate SR/PE #\nConversion Related Data\nPE#: 0123456789-10\nEvent ID 123456789']).chunks
         verify_record(chunks,'123456789','DER')
         chunks.append(Chunk(id='bad',locator='page 99',text='Event ID 987654321'))
         with self.assertRaises(ValueError):verify_record(chunks,'123456789','DER')
-
     def test_headings_not_page_numbers_route_investigation(self):
         for shift in [0,45]:
             index=RecordIndex([source(PAGES,shift)])
@@ -61,7 +50,6 @@ class DetailedReportTests(unittest.TestCase):
             candidates=index.candidates([('investigation','investigation',[],False)])
             self.assertIn(section,candidates)
             self.assertTrue(any(s.kind=='analysis_detail' for s in candidates))
-
     def test_linked_initial_and_followup_keep_original_locations(self):
         s=source(PAGES);forms,warnings=embedded_mdrs(s)
         self.assertEqual(len(forms),2);self.assertEqual(warnings,[])
@@ -70,14 +58,12 @@ class DetailedReportTests(unittest.TestCase):
         self.assertEqual(forms[1].file_sha256,s.file_sha256)
         self.assertEqual(forms[1].extracted_text_sha256,extracted_digest(forms[1].chunks))
         self.assertEqual(s.chunks[6].text,forms[0].chunks[0].text)
-
     def test_unlinked_form_and_mdr_mentions_do_not_qualify(self):
         pages=PAGES[:6]+[p.replace('1111111-2026-01234','2222222-2026-99999') for p in PAGES[6:]]
         forms,warnings=embedded_mdrs(source(pages))
         self.assertEqual(forms,[]);self.assertEqual(len(warnings),2)
         index=RecordIndex([source(PAGES[:6])])
         self.assertFalse(any(s.kind=='mdr' for s in index.sections))
-
     def test_section_reads_are_bounded_and_scoped(self):
         index=RecordIndex([source(PAGES)]);section=next(s for s in index.sections if s.kind=='mdr')
         rows,page=index.read(section.source_id,section.id,0,1)
@@ -85,9 +71,7 @@ class DetailedReportTests(unittest.TestCase):
         rows,page=index.read(section.source_id,section.id,1,1)
         self.assertIsNone(page['next_offset'])
         with self.assertRaises(ValueError):index.read('wrong-source',section.id)
-
     def test_full_review_runs_mdr_consistency_and_saves_coverage(self):
-        # Separate pages via an in-memory PDF to exercise the normal entry point.
         import io
         from pypdf import PdfWriter
         from pypdf.generic import DictionaryObject, NameObject, DecodedStreamObject
@@ -122,6 +106,4 @@ class DetailedReportTests(unittest.TestCase):
                 consistency.record_evidence=consistency.record_evidence[:1]
                 with self.assertRaisesRegex(ValueError,'event and MDR evidence'):validate_traceability(review,evidence)
             finally:repo.db.close()
-
-
 if __name__=='__main__':unittest.main()

@@ -1,4 +1,3 @@
-"""Background helper tests use synthetic sources and a mock MDT provider."""
 import base64
 import io
 import json
@@ -10,20 +9,15 @@ import sys
 import tempfile
 import time
 import unittest
-
 from native_host import NativeService, allowed_origin, encode_message, read_message, MAX_IN
 from config import PROCEDURES, ROOT
 from test_app import MockProvider, PESR, encoded
-
-
 class FakeVault:
     supported = True
     def __init__(self): self.token = ''
     def load(self): return self.token
     def save(self, token): self.token = token
     def clear(self): self.token = ''
-
-
 class NativeTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -32,29 +26,24 @@ class NativeTests(unittest.TestCase):
         self.service = NativeService(self.directory, MockProvider, self.vault, bundled_directory=None)
         self.service.app.downloads = self.directory/'Downloads'
         self.service.app.downloads.mkdir()
-
     def tearDown(self):
         self.service.close()
         self.temp.cleanup()
-
     def configure(self):
         self.service.dispatch('token', {'token':'synthetic-test-secret','remember':True})
         for docid,_ in PROCEDURES[:6]:
             content=f'{docid} revision TEST ONLY\nUse the supplied event identifier for this synthetic exercise. No real procedure is represented.\n'.encode()
             self.service.dispatch('procedure', {'document_id':docid,'revision':'TEST','approved':True,'file':encoded(docid+'.txt',content)})
-
     def test_binary_protocol_handles_unicode_and_rejects_oversize(self):
         value={'id':1,'message':'é → ready'}
         self.assertEqual(read_message(io.BytesIO(encode_message(value))),value)
         self.assertIsNone(read_message(io.BytesIO()))
         with self.assertRaises(ValueError):read_message(io.BytesIO(struct.pack('=I',MAX_IN+1)))
         with self.assertRaises(EOFError):read_message(io.BytesIO(b'\x10\x00'))
-
     def test_all_six_references_required_for_one_click_review(self):
         self.service.dispatch('token',{'token':'synthetic-test-secret','remember':False})
         with self.assertRaisesRegex(ValueError,'six training procedures'):
             self.service.dispatch('capture_start',{'record_id':'TRAIN-001','stage':'Intake'})
-
     def test_token_stays_out_of_status_and_plaintext_settings(self):
         result=self.service.dispatch('token',{'token':'synthetic-test-secret','remember':True})
         self.assertTrue(result['token_present'])
@@ -63,7 +52,6 @@ class NativeTests(unittest.TestCase):
         self.service.dispatch('clear_token',{})
         self.assertFalse(self.service.status()['token_present'])
         self.assertEqual(self.vault.token,'')
-
     def test_capture_review_and_automatic_word_save_once(self):
         self.configure()
         lease=self.service.dispatch('capture_start',{'record_id':'TRAIN-001','stage':'Intake'})
@@ -105,17 +93,14 @@ class NativeTests(unittest.TestCase):
     def test_open_report_cannot_open_an_arbitrary_path(self):
         with self.assertRaisesRegex(ValueError,'no longer available'):
             self.service.dispatch('open_report',{'id':'../../../other.exe'})
-
     def test_native_origin_is_pinned_to_this_extension(self):
         extension=json.loads((ROOT/'native_config.json').read_text())['extension_id']
         self.assertTrue(allowed_origin('chrome-extension://'+extension+'/'))
         self.assertFalse(allowed_origin('https://crm.medtronic.com/'))
         self.assertFalse(allowed_origin('chrome-extension://'+'a'*32+'/'))
-
     def test_no_arbitrary_native_commands(self):
         with self.assertRaisesRegex(ValueError,'Unknown command'):
             self.service.dispatch('execute',{'command':'anything'})
-
     def test_actual_host_stdio_round_trip_without_a_window(self):
         extension=json.loads((ROOT/'native_config.json').read_text())['extension_id']
         env=dict(os.environ,GCH_DATA_DIR=str(self.directory/'protocol'))
@@ -127,6 +112,4 @@ class NativeTests(unittest.TestCase):
         self.assertTrue(reply['ok'])
         self.assertEqual(reply['id'],3)
         self.assertFalse(reply['result']['token_present'])
-
-
 if __name__=='__main__':unittest.main()

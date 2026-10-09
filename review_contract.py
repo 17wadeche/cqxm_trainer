@@ -1,41 +1,27 @@
-"""Model-facing evidence IDs resolve to immutable excerpts owned by this review."""
 from copy import copy
 import json
 import re
-
 from pydantic import Field, ValidationError
-
 from models import Citation, Finding, Review
 from mdt import output_schema
-
-
 class DraftFinding(Finding):
     record_evidence: list[str]
     procedure_references: list[str]
-
-
 class DraftReview(Review):
     findings: list[DraftFinding] = Field(min_length=1, max_length=60)
-
-
 class ContractError(ValueError):
     def __init__(self, code, instruction, path='findings'):
         self.issue = {'code':code, 'path':path, 'instruction':instruction}
         super().__init__(instruction)
-
-
 class EvidenceCatalog:
     def __init__(self, sources, compact=False):
         self.sources = {s.id:s for s in sources}
         self.entries, self.keys = {}, {}
         self.compact=compact
-
     def preview(self, chunks):
-        """Return a staged catalog; only commit it if these excerpts are sent."""
         staged=copy(self)
         staged.entries, staged.keys = self.entries.copy(), self.keys.copy()
         return staged.add(chunks), staged
-
     def add(self, chunks):
         rows=[]
         for row in chunks:
@@ -58,19 +44,14 @@ class EvidenceCatalog:
                     evidence_id=f'E{len(self.entries)+1:04d}'
                     self.keys[key]=evidence_id
                     self.entries[evidence_id]=(source.kind,Citation(source_id=source.id,chunk_id=chunk.id,quote=quote))
-                # Keep the immutable verbatim quote for Word/evidence validation.
-                # Model packets need neither PDF indentation nor blank-line runs.
-                # Retain line breaks and two-space column separators for tables.
                 display=re.sub(r'[ \t]{3,}','  ',quote) if self.compact else quote
                 if self.compact:display=re.sub(r'\n[ \t]*\n(?:[ \t]*\n)*','\n',display)
                 excerpts.append({'evidence_id':evidence_id,'text':display})
             rows.append({'source_id':source.id,'chunk_id':chunk.id,'locator':row.get('locator',chunk.locator),
                          'kind':source.kind,'excerpts':excerpts})
         return rows
-
     def ids(self, kind):
         return [key for key,(entry_kind,_) in self.entries.items() if entry_kind==kind]
-
     def schema(self, expected):
         schema=DraftReview.model_json_schema()
         fields=schema['$defs']['DraftFinding']['properties']
@@ -79,18 +60,13 @@ class EvidenceCatalog:
             fields[field]['description']='Select supplied '+kind+' evidence IDs. Do not write quotes, source IDs or citation objects.'
             if self.ids(kind):fields[field]['items']['enum']=self.ids(kind)
         return output_schema(schema)
-
     def parse(self, text, expected):
-        # Compatibility mode may add a single Markdown wrapper. Strip only an
-        # entire wrapper; never salvage a fragment from surrounding prose.
         text=text.strip()
         match=re.fullmatch(r'```(?:json)?\s*\n([\s\S]*?)\n```',text,re.I)
         if match:text=match.group(1)
         try:data=json.loads(text)
         except (ValueError,TypeError):
             raise ContractError('invalid_json','Return one complete JSON object matching the supplied schema.','response') from None
-        # Case-only differences have one canonical interpretation. Do not
-        # fuzzy-match IDs, paraphrases, enum synonyms, or factual content.
         known={key.casefold():key for key in expected}
         if isinstance(data,dict) and isinstance(data.get('findings'),list):
             for finding in data['findings']:
@@ -122,10 +98,7 @@ class EvidenceCatalog:
                 item[field]=resolved
             findings.append(Finding.model_validate(item))
         return Review(overall_summary=draft.overall_summary,limitations=draft.limitations,findings=findings)
-
-
 def validation_issues(error, expected):
-    """Give actionable repair details without copying model text or source data."""
     if isinstance(error,ContractError):return [error.issue]
     if isinstance(error,ValidationError):
         fields=set(Finding.model_fields)|set(Review.model_fields)|{'response'}

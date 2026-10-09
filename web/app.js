@@ -7,7 +7,6 @@ const initialJob = fragment.get('job');
 history.replaceState(null, '', location.pathname);
 const state = { status: null, job: null, evidence: null, timer: null, finished: null };
 const labels = {done_properly:'Done properly', needs_trainer_review:'Trainer review', potential_gap:'Potential gap', not_assessable:'Not assessable', not_applicable:'Not applicable'};
-
 function node(tag, text, className) {
   const item = document.createElement(tag);
   if (text !== undefined) item.textContent = text;
@@ -137,7 +136,6 @@ $('cancel-button').addEventListener('click',async()=>{if(!state.job)return;try{a
 $('filter').addEventListener('change',renderFindings);
 $('download-word').addEventListener('click',()=>busy($('download-word'),'Downloading…',()=>download('/api/jobs/'+state.job.id+'/word','GCH_Training_Review_'+state.job.record_id+'.docx')));
 $('download-evidence').addEventListener('click',()=>busy($('download-evidence'),'Downloading…',()=>download('/api/jobs/'+state.job.id+'/evidence','GCH_Evidence_'+state.job.record_id+'.json')));
-
 async function follow(job) {
   clearTimeout(state.timer);state.job=job;view('review');readiness();
   const active=['queued','running'].includes(job.status);
@@ -182,7 +180,6 @@ function renderFindings() {
   }
   if(!shown.length)$('findings').append(node('p','No findings match this filter.','support'));
 }
-
 (async()=>{
   if(!token){notice('Start the companion using Start-Windows.cmd or start.sh. The launcher opens this workspace with its local session code.');return;}
   try{await refreshStatus(true);if(initialJob)await follow(await api('/api/jobs/'+initialJob));}

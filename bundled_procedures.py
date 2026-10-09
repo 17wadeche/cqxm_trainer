@@ -1,12 +1,8 @@
-"""Install user-selected baseline PDFs once; local replacement revisions win."""
 import hashlib
 import json
 from pathlib import Path
-
 from config import PROCEDURES, MAX_FILE_BYTES
 from models import EvidenceSource, extracted_digest
-
-
 def _asset(directory, filename):
     if not isinstance(filename,str) or not filename or Path(filename).name != filename or '\\' in filename:
         raise ValueError('Invalid bundled filename')
@@ -14,10 +10,7 @@ def _asset(directory, filename):
     if path.stat().st_size > MAX_FILE_BYTES:
         raise ValueError('Bundled file is too large')
     return path.read_bytes()
-
-
 def load_defaults(repo, directory):
-    """Return setup errors without making startup, token entry or uploads fail."""
     pending=repo.defaults_pending()
     if not pending:
         return []

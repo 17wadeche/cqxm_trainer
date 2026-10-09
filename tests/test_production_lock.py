@@ -1,4 +1,3 @@
-"""Production migration clears unscoped/old credentials and preserves documents."""
 import json
 from pathlib import Path
 import tempfile
@@ -9,11 +8,9 @@ from config import DEFAULT_MODEL,DEFAULT_AUTH,ENVIRONMENT,PROVIDER,SETTINGS_VERS
 from native_host import NativeService
 from test_native import FakeVault
 from test_app import MockProvider
-
 class MigrationTests(unittest.TestCase):
     def current(self,**kwargs):
         return dict(settings_version=SETTINGS_VERSION,provider=PROVIDER,environment=ENVIRONMENT,model=DEFAULT_MODEL,auth_style=DEFAULT_AUTH,**kwargs)
-
     def test_old_development_and_anthropic_production_settings_migrate(self):
         for old in [{'environment':'development','settings_version':2}, {'environment':'production','settings_version':2}, {}]:
             with self.subTest(old=old),tempfile.TemporaryDirectory() as d:
@@ -29,7 +26,6 @@ class MigrationTests(unittest.TestCase):
                     stored=json.loads((path/'settings.json').read_text());self.assertEqual(stored['provider'],PROVIDER)
                     self.assertNotIn('old-token',json.dumps(stored));self.assertNotIn('opus48_verified',stored)
                 finally:service.close()
-
     def test_current_scoped_token_is_retained(self):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d);vault=FakeVault();vault.token='production-token'
@@ -37,7 +33,6 @@ class MigrationTests(unittest.TestCase):
             service=NativeService(path,MockProvider,vault,bundled_directory=None)
             try:self.assertEqual(service.app.connection['token'],'production-token')
             finally:service.close()
-
     def test_interrupted_migration_still_clears_vault_on_restart(self):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d);vault=FakeVault();vault.token='old-token'
@@ -48,7 +43,6 @@ class MigrationTests(unittest.TestCase):
             service=NativeService(path,MockProvider,vault,bundled_directory=None)
             try:self.assertEqual(vault.token,'')
             finally:service.close()
-
     def test_token_setup_saves_only_after_success_and_rejects_stale_settings(self):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d);vault=FakeVault();service=NativeService(path,MockProvider,vault,bundled_directory=None)
@@ -61,5 +55,4 @@ class MigrationTests(unittest.TestCase):
                     with self.assertRaises(ValueError):service.dispatch('settings',data)
                 self.assertEqual(service.status()['model'],DEFAULT_MODEL)
             finally:service.close()
-
 if __name__=='__main__':unittest.main()

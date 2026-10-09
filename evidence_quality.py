@@ -1,13 +1,5 @@
-"""Reject concrete claims that supplied sections were unavailable.
-
-This is an availability check, not a clinical or procedural assessment. It never
-selects a finding's assessment or fills missing record facts.
-"""
 import re
-
 from review_contract import ContractError
-
-
 def validate_availability(review, sources, sections, sent):
     by_id={s.id:s for s in sources}
     complete=[s for s in sections if all((s.source_id,c.id) in sent for c in s.chunks)]
@@ -21,8 +13,6 @@ def validate_availability(review, sources, sections, sent):
                 if appendix:label=r'Appendix\s+'+appendix[1]+r'\b'
                 elif numbered:label=r'Section\s+'+numbered[1]+r'\b'
                 else:continue
-                # A document mention must identify the source; avoid treating
-                # another procedure's Appendix A as this one.
                 docs=set(re.findall(r'\b\d{3}-(?:WI|P)\d+\b',text,re.I))
                 if docs and source.document_id not in docs:continue
                 if not docs and source.document_id not in {by_id[c.source_id].document_id for c in finding.procedure_references}:continue
@@ -31,8 +21,6 @@ def validate_availability(review, sources, sections, sent):
             assertion=r'(?:(?:was|were|is|are|they were)\s+not\s+(?:available|supplied|provided)|unavailable|missing)'
             match=(re.search(label+r'[^.!?]{0,140}?'+assertion,text,re.I) or
                    re.search(r'\b(?:unavailable|missing)\s+(?:'+label+r')',text,re.I))
-            # An available rule can legitimately be cited while explaining a
-            # missing record date/response. Do not conflate the two subjects.
             if match and source.kind=='procedure':
                 tail=re.sub(r'^'+label,'',match[0],flags=re.I)
                 if re.search(r'\b(?:date|record|fact|attempt|response|rationale|consultation|evidence|exception)\b',tail,re.I):match=None

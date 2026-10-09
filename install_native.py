@@ -1,10 +1,7 @@
-"""One-time Windows helper registration, run by Install-Windows.cmd."""
 import json
 import os
 from pathlib import Path
 import sys
-
-
 def main():
     if os.name != 'nt':
         raise SystemExit('This installer is for Windows.')
@@ -23,7 +20,5 @@ def main():
         winreg.SetValueEx(key, '', 0, winreg.REG_SZ, str(target))
     print('Background helper installed. It will start automatically from GCH.')
     print('Load the extension folder in Chrome once, then reload GCH.')
-
-
 if __name__ == '__main__':
     main()

@@ -1,10 +1,8 @@
-// DOM-selection fixtures, not a substitute for testing the live SAP page.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {recordContext, actionInFrame, attachmentsInFrame} from '../extension/gch-dom.mjs';
-
 function element(text, attrs={}) {
   return {innerText:text, textContent:text, title:attrs.title||'', value:'', disabled:!!attrs.disabled,
     children:[], clicks:0, getAttribute(name){return attrs[name]??null;},

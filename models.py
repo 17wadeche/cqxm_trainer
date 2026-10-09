@@ -22,7 +22,6 @@ class Finding(StrictModel):
     feedback: str = Field(min_length=1, description="One or two short sentences, usually 15-30 words, for a new learner: what this means and what to check next. Use everyday words; explain necessary jargon. Preserve essential uncertainty. These are soft targets; longer explanations are allowed when essential. Never truncate evidence or qualifications.")
     priority: Literal["high", "medium", "low", "none"]
     study_action: str = Field(description="One concrete next action in 8-15 words, or empty when priority is none.")
-
 class Review(StrictModel):
     overall_summary: str = Field(min_length=1, description="A concise summary of actual coverage and limitations.")
     limitations: list[str]

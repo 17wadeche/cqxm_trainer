@@ -1,14 +1,10 @@
-"""Local SQLite document storage and bounded lexical retrieval."""
 import json
 import re
 import sqlite3
 import threading
 from datetime import datetime, timezone
-
 from models import EvidenceSource
 from config import PROCEDURES
-
-
 class Repository:
     def __init__(self, directory):
         self.directory = directory
@@ -34,7 +30,6 @@ class Repository:
           docid TEXT PRIMARY KEY
         );
         """)
-
     def _put(self, source, warnings, origin):
         if source.kind == "procedure":
             self.db.execute("UPDATE sources SET active=0 WHERE docid=? AND kind='procedure'", (source.document_id,))
@@ -44,21 +39,15 @@ class Repository:
         self.db.execute("INSERT INTO source_origins VALUES (?,?)", (source.id, origin))
         self.db.executemany("INSERT INTO chunks VALUES (?,?,?,?)", [
             (source.id, c.id, c.locator, c.text) for c in source.chunks])
-
     def put(self, source, warnings):
         with self.lock, self.db:
             self._put(source, warnings, 'uploaded')
-
     def defaults_pending(self):
-        """A baseline never replaces local history or an explicit removal."""
         with self.lock:
             initialized={r[0] for r in self.db.execute('SELECT docid FROM default_initializations')}
             existing={r[0] for r in self.db.execute("SELECT docid FROM sources WHERE kind='procedure'")}
         return {docid for docid,_ in PROCEDURES} - initialized - existing
-
     def install_defaults(self, entries):
-        # A separate helper/manual process can share this database. Check again
-        # under a SQLite write lock so startup cannot overwrite a concurrent upload.
         with self.lock:
             self.db.execute('BEGIN IMMEDIATE')
             try:
@@ -72,7 +61,6 @@ class Repository:
             except Exception:
                 self.db.rollback()
                 raise
-
     def active_procedures(self):
         permitted = [document_id for document_id, _ in PROCEDURES]
         placeholders = ','.join('?' for _ in permitted)
@@ -81,7 +69,6 @@ class Repository:
                 f"SELECT payload,warnings FROM sources WHERE kind='procedure' AND active=1 AND docid IN ({placeholders}) ORDER BY docid",
                 permitted).fetchall()
         return [(EvidenceSource.model_validate_json(r['payload']), json.loads(r['warnings'])) for r in rows]
-
     def catalog(self):
         with self.lock:
             origins=dict(self.db.execute('SELECT source_id,origin FROM source_origins').fetchall())
@@ -89,7 +76,6 @@ class Repository:
                  "revision": s.revision, "chunks": len(s.chunks), "warnings": w,
                  "origin": origins.get(s.id,'uploaded')}
                 for s, w in self.active_procedures()]
-
     def remove(self, source_id):
         with self.lock, self.db:
             row=self.db.execute("SELECT docid FROM sources WHERE id=? AND kind='procedure'",(source_id,)).fetchone()
@@ -98,14 +84,12 @@ class Repository:
             self.db.execute('DELETE FROM source_origins WHERE source_id=?',(source_id,))
             self.db.execute("DELETE FROM chunks WHERE source_id=?", (source_id,))
             self.db.execute("DELETE FROM sources WHERE id=?", (source_id,))
-
     def search(self, query, source_ids, limit=6):
         if not source_ids:
             return []
         terms = list(dict.fromkeys(re.findall(r"[\w-]{3,}", query.lower())))[:18]
         if not terms:
             return []
-        # Quote terms; never accept raw FTS operators from model text.
         match = " OR ".join('"' + term.replace('"', '') + '"' for term in terms)
         marks = ",".join("?" for _ in source_ids)
         with self.lock:

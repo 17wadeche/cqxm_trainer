@@ -9,7 +9,6 @@ import subprocess
 import tempfile
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
-
 MEDIA_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tif', '.tiff', '.webp',
                     '.heic', '.svg', '.mp4', '.mov', '.avi', '.mkv', '.wmv', '.mpeg',
                     '.mpg', '.webm', '.m4v'}
@@ -17,8 +16,6 @@ TEXT_EXTENSIONS = {'.txt', '.csv', '.tsv', '.json', '.xml', '.md', '.log'}
 ATTACHMENT_EXTENSIONS = TEXT_EXTENSIONS | {'.pdf', '.docx', '.eml', '.msg', '.rtf',
     '.html', '.htm', '.xlsx', '.xlsm', '.pptx', '.pptm', '.odt', '.ods', '.odp',
     '.doc', '.xls', '.ppt', '.docm', '.zip'}
-
-
 class PlainHTML(HTMLParser):
     def __init__(self):
         super().__init__(); self.parts = []; self.hidden = 0
@@ -30,13 +27,9 @@ class PlainHTML(HTMLParser):
         if tag in {'script', 'style'}: self.hidden = max(0, self.hidden - 1)
     def handle_data(self, data):
         if not self.hidden: self.parts.append(data)
-
-
 def plain_html(text):
     parser = PlainHTML(); parser.feed(text)
     return ''.join(parser.parts)
-
-
 def decode_text(data):
     for encoding in ('utf-8-sig', 'utf-16' if data.startswith((b'\xff\xfe', b'\xfe\xff')) else 'utf-8', 'cp1252'):
         try:
@@ -44,16 +37,12 @@ def decode_text(data):
             if '\x00' not in text: return text
         except UnicodeError: pass
     raise ValueError('This attachment is not readable text. Export a text-based copy.')
-
-
 def extra_blocks(name, data, depth=0):
-    """Return located blocks and explicit extraction limits; never fetch remote content."""
     ext = Path(name).suffix.lower()
     warnings = []
     if ext in {'.mp3', '.wav', '.m4a', '.ogg', '.aac', '.flac'}:
         raise ValueError('Audio needs a text transcript before it can be compared.')
     if ext not in ATTACHMENT_EXTENSIONS and ext not in MEDIA_EXTENSIONS:
-        # SAP can download an attachment without its original extension.
         from ingest import extract
         if data.startswith(b'%PDF-'):
             chunks, limits = extract('attachment.pdf', data, depth=depth)
@@ -155,7 +144,6 @@ def extra_blocks(name, data, depth=0):
                 try:
                     blocks = []
                     for sheet in book:
-                        # Ignore stale dimensions; bound actual populated rows below.
                         sheet.reset_dimensions()
                         for i, row in enumerate(sheet.iter_rows(values_only=True), 1):
                             if i > 100000: raise ValueError('The spreadsheet exceeds 100,000 rows.')
@@ -173,7 +161,6 @@ def extra_blocks(name, data, depth=0):
                 for path in paths:
                     root = ET.fromstring(archive.read(path))
                     text = '\n'.join(''.join(node.itertext()) for node in root.iter() if node.tag.rsplit('}', 1)[-1] in {'p', 'h'})
-                    # DrawingML paragraphs have text children, not paragraph text.
                     if text.strip(): blocks.append((path, text))
                 warnings.append(f'{name}: images, charts and embedded objects were not interpreted.')
         return blocks, warnings

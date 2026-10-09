@@ -1,8 +1,5 @@
-"""Synthetic Responses wire fixtures; never connect to a real model."""
 import json
 from config import DEFAULT_MODEL
-
-
 def wire_response(value):
     output=[]
     reason=value.get('stop_reason','end_turn')
@@ -17,12 +14,8 @@ def wire_response(value):
     if reason=='max_tokens':result.update(status='incomplete',incomplete_details={'reason':'max_output_tokens'})
     elif reason not in {'end_turn','tool_use','refusal'}:result['status']=reason
     return result
-
-
 def response(text='{"status":"ok"}', **kwargs):
     return wire_response({'content':[{'type':'text','text':text}],**kwargs})
-
-
 def decode_payload(payload):
     system=payload['input'][0]['content']
     messages=[]
@@ -37,8 +30,6 @@ def decode_payload(payload):
             messages.append({'role':i['role'],'content':[{'type':'text','text':c['text']} for c in i['content']]})
         else:messages.append(i)
     return system,messages
-
-
 def invoke_mock(mock,payload):
     system,messages=decode_payload(payload)
     return wire_response(mock.message(system,messages,tools=payload.get('tools'),schema=payload.get('text'),max_tokens=payload['max_output_tokens']))
