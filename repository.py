@@ -66,7 +66,7 @@ class Repository:
         placeholders = ','.join('?' for _ in permitted)
         with self.lock:
             rows = self.db.execute(
-                f"SELECT payload,warnings FROM sources WHERE kind='procedure' AND active=1 AND docid IN ({placeholders}) ORDER BY docid",
+                f"SELECT payload,warnings FROM sources WHERE kind='procedure' AND active=1 AND (docid IN ({placeholders}) OR docid LIKE 'LOCAL-%') ORDER BY docid",
                 permitted).fetchall()
         return [(EvidenceSource.model_validate_json(r['payload']), json.loads(r['warnings'])) for r in rows]
     def catalog(self):

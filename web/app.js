@@ -6,7 +6,7 @@ if (token) sessionStorage.setItem('gch-session', token);
 const initialJob = fragment.get('job');
 history.replaceState(null, '', location.pathname);
 const state = { status: null, job: null, evidence: null, timer: null, finished: null };
-const labels = {done_properly:'Done properly', needs_trainer_review:'Trainer review', potential_gap:'Potential gap', not_assessable:'Not assessable', not_applicable:'Not applicable'};
+const labels = {manual_review_needed:'Manual Review Needed', done_properly:'Done properly', needs_trainer_review:'Trainer review', potential_gap:'Potential gap', not_assessable:'Not assessable', not_applicable:'Not applicable'};
 function node(tag, text, className) {
   const item = document.createElement(tag);
   if (text !== undefined) item.textContent = text;
@@ -60,12 +60,12 @@ function readiness() {
   const ready=info&&info.token_present&&info.procedure_count>0;
   $('check-button').disabled=!ready||running;
   if(!info)return;
-  const core=info.procedures.filter(p=>!p.document_id.startsWith('D')).length;
-  $('readiness').textContent=!info.token_present?'Add your MDT-GPT token in Connection.':!info.procedure_count?'Add approved documents in Procedures.':core+' of 6 core procedures loaded. Missing inputs will be marked not assessable.';
+  const core=info.procedures.filter(p=>info.expected_procedures.some(e=>e.id===p.document_id)).length;
+  $('readiness').textContent=!info.token_present?'Add your MDT-GPT token in Connection.':!info.procedure_count?'Add approved documents in Procedures.':core+' of '+info.expected_procedures.length+' default procedures loaded. Missing inputs will be marked not assessable.';
   $('connection-badge').textContent=info.connection_tested?'MDT-GPT connected':info.token_present?'Token entered · test connection':'Setup needed';
   $('connection-badge').className='pill '+(info.connection_tested?'ready':'warning');
   $('procedure-count').textContent=info.procedure_count;
-  $('reference-summary').textContent=core+' of 6 core documents';
+  $('reference-summary').textContent=core+' of '+info.expected_procedures.length+' default documents';
 }
 async function refreshStatus(populate=false) {
   state.status=await api('/api/status');
@@ -169,7 +169,8 @@ function renderFindings() {
   for(const finding of shown){
     const card=node('article',undefined,'finding'),head=node('div',undefined,'finding-head');
     head.append(node('h4',(items.indexOf(finding)+1)+'. '+finding.record_element),node('span',labels[finding.assessment],'assessment '+finding.assessment));
-    card.append(head,node('p',finding.what_was_done),node('p',finding.feedback,'feedback'));
+    if(finding.assessment==='manual_review_needed')card.append(head,node('p','Manual Review Needed','feedback'));
+    else card.append(head,node('p',finding.what_was_done),node('p',finding.feedback,'feedback'));
     if(finding.study_action)card.append(node('div',finding.priority.toUpperCase()+' STUDY PRIORITY · '+finding.study_action,'study-action'));
     const refs=[...finding.record_evidence,...finding.procedure_references];
     if(refs.length){const detail=node('details');detail.append(node('summary','View cited evidence ('+refs.length+')'));

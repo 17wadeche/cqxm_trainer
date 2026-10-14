@@ -16,6 +16,30 @@ FOCUS = {
     'consistency': {'027-WI185': EVENT_DETAILS+[r'^\d+\.\s*(?:Assign Event Coding|Event Reassessment)']},
     'closure': {'027-P043': [r'^\d+\.\s*(?:Complaint Investigation|Regulatory Reporting|Customer Communication|Complaint Closure)']},
 }
+for key, base in {
+    'initial_reporter':'narrative','country':'narrative',
+    'notified_aware_date':'timing','event_date':'narrative',
+    'complaint_notified_date':'narrative','complaint_status':'closure',
+    'product_return_status':'gfe','no_return_rationale':'gfe','rfr':'identifiers',
+    'brief_description':'narrative','therapy':'identifiers',
+    'investigation_summary':'investigation','customer_response':'gfe',
+}.items():
+    FOCUS[key] = FOCUS[base]
+FOCUS['notified_aware_date'] = {**FOCUS['timing'], '027-WI185': EVENT_DETAILS}
+for key, docid in [('brazil_reporting','D00780668'), ('china_reporting','054-WI204'),
+                   ('japan_reporting','D00780698'), ('korea_reporting','D00780699')]:
+    FOCUS[key] = {docid: [r'.*'], '054-P044': [r'.*']}
+MDR_FIELDS = {
+    'mdr_narratives': r'^(?:B[567]|H11):',
+    'mdr_patient_device': r'^(?:A[1-9]?|D[0-9]*|H[345789]|G[125]):',
+    'mdr_initial_reporter': r'^(?:E[0-9]*|G2):',
+    'mdr_event_dates': r'^(?:B[34]|G3):',
+    'mdr_patient_severity': r'^(?:B[12]|G7|H[12]):',
+}
+for key, fields in MDR_FIELDS.items():
+    FOCUS[key] = {'D00788856': [fields, r'^Overview and processing considerations']}
+    if key in {'mdr_narratives','mdr_event_dates','mdr_patient_severity'}:
+        FOCUS[key]['054-WI198'] = [r'^\d+\.', r'^Appendix']
 def headings(page):
     found=[]
     for chunk in page:
@@ -33,6 +57,17 @@ class ProcedureIndex:
         self.sections=[]
         for source in sources:
             if source.kind!='procedure':continue
+            if source.document_id == 'D00788856' and source.name.lower().endswith('.docx'):
+                groups={}
+                for chunk in source.chunks:
+                    row=re.match(r'^(Body, table \d+, row \d+), cell \d+', chunk.locator)
+                    key=row[1] if row else 'Overview and processing considerations'
+                    groups.setdefault(key, []).append(chunk)
+                for key, chunks in groups.items():
+                    title=chunks[0].text.splitlines()[0][:120] if key != 'Overview and processing considerations' else key
+                    self.sections.append(Section(f'policy-{len(self.sections)+1:03d}', source.id,
+                                                 'procedure', title, chunks))
+                continue
             active=[]
             for page in page_groups(source):
                 titles=headings(page)

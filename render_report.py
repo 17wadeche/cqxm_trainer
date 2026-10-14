@@ -7,19 +7,24 @@ from docx.shared import Pt, RGBColor
 from models import Review, EvidenceManifest, validate_traceability
 from word_styles import document, table, body
 LABELS = {
+    "manual_review_needed": "Manual Review Needed",
     "done_properly": "Done properly", "needs_trainer_review": "Trainer review",
     "potential_gap": "Potential gap", "not_assessable": "Not assessable",
     "not_applicable": "Not applicable",
 }
 TABLE_LIMITS = {'record_element':120, 'what_was_done':500, 'feedback':600, 'study_action':400}
-FIELD_LABELS = {'record_element':'Record element', 'what_was_done':'What was done',
-                'feedback':'Feedback for new employee', 'study_action':'Study action'}
+FIELD_LABELS = {
+    "manual_review_needed": "Manual Review Needed",'record_element':'Record element', 'what_was_done':'What was done',
+    'feedback':'Feedback for new employee', 'study_action':'Study action'}
 def fits_cell(text, limit):
     return len(text)<=limit and text.count('\n')<=6
-SHORT_LABELS = {'intake':'Intake', 'narrative':'Reported event', 'identifiers':'Product identifiers',
+LEGACY_SHORT_LABELS = {
+    "manual_review_needed": "Manual Review Needed",'intake':'Intake', 'narrative':'Reported event', 'identifiers':'Product identifiers',
     'coding':'Event coding', 'harm':'Patient impact', 'gfe':'Good faith effort',
     'investigation':'Investigation', 'cause':'Cause and conclusion', 'reportability':'US reportability',
     'timing':'Reporting dates', 'consultation':'Medical consultation', 'consistency':'Event and medical report', 'closure':'Closure'}
+from config import REVIEW_LABELS
+SHORT_LABELS = {**LEGACY_SHORT_LABELS, **REVIEW_LABELS}
 def compact_references(finding, sources):
     grouped={}
     for ref in finding.procedure_references:
@@ -47,7 +52,7 @@ def write_concise_report(*, record_id, stage, findings, procedures, scope, outpu
     body(doc,' | '.join(f'{counts[key]} {label}' for key,label in [
         ('done_properly','done properly'),('needs_trainer_review','trainer review'),
         ('potential_gap','potential gaps'),('not_assessable','not assessable'),
-        ('not_applicable','not applicable')] if counts[key]))
+        ('not_applicable','not applicable'),('manual_review_needed','manual review needed')] if counts[key]))
     doc.add_heading('Training review',1)
     rows=[[i,f['area'],'' if f['assessment']=='done_properly' else f['observation'],f['references'],
            '✓ Done properly' if f['assessment']=='done_properly' else LABELS[f['assessment']],
@@ -56,6 +61,8 @@ def write_concise_report(*, record_id, stage, findings, procedures, scope, outpu
     review_table=table(doc,['#','Review area','What the record shows','Procedure reference','Assessment','What to learn or check'],
           rows,[.25,.85,1.35,1.05,.85,2.80],font_size=10,center_cols=(0,),allow_split=True)
     for i,f in enumerate(findings,1):
+        if f['assessment']=='manual_review_needed':
+            review_table.cell(i,2).merge(review_table.cell(i,5)).text='Manual Review Needed'
         if f['assessment']=='done_properly':
             cell=review_table.cell(i,4)
             cell.text=''
@@ -143,8 +150,11 @@ def render_detailed(review: Review, evidence: EvidenceManifest, output: Path) ->
             refs=f'See evidence for item {i}.'
         rows.append([i, cell_text(i,f,'record_element'), cell_text(i,f,'what_was_done'), refs,
                      LABELS[f.assessment], cell_text(i,f,'feedback')])
-    table(doc, ["#", "Record element", "What was done", "Procedure reference", "Assessment", "Feedback for new employee"],
+    review_table = table(doc, ["#", "Record element", "What was done", "Procedure reference", "Assessment", "Feedback for new employee"],
           rows, [.25, 1.05, 1.35, 1.20, 1.00, 2.35], font_size=9.5, center_cols=(0,))
+    for i, f in enumerate(review.findings, 1):
+        if f.assessment == 'manual_review_needed':
+            review_table.cell(i,2).merge(review_table.cell(i,5)).text='Manual Review Needed'
     doc.add_heading("Study priorities", 1)
     priorities = sorted([(i,f) for i,f in enumerate(review.findings,1) if f.priority != "none"],
                         key=lambda pair: {"high": 0, "medium": 1, "low": 2}[pair[1].priority])

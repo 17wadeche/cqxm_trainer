@@ -1,5 +1,17 @@
 # Validation record
 
+## 14 October 2026 — v0.8.0
+
+All **151 Python tests and 63 JavaScript tests passed (214 total)** with Python 3.12 and Node 24. Commands: `python -m unittest discover -s tests -v` and `node --test tests/*.mjs`.
+
+The full mocked review uses all eleven bundled instructions and a synthetic event/MDR. It produces the 46 screenshot areas in order, excludes all 19 red areas from every model packet, and verifies fixed Manual Review Needed rows merged across assessment columns in concise and detailed Word output. Traceability rejects attempted assessment of manual rows and MDR field findings without MDR citations. The bounded review-call cap is 160 for the expanded checklist, retaining separate retrieval, draft and verification turns.
+
+New defaults have verified original-file and extracted-text digests, including the supplied DOCX. Field-level 3500A guidance retains its complete table row, including nested content. Country-specific routes include their complete supplied instructions. Separate date checks retain distinct evidence anchors.
+
+Chrome fixtures complete report capture/review on production, crmstage and cpic1cs:8008, reject unsupported hosts and ports, and verify panel-resize targeting when the parent suppresses referrers. Settings UI and native-helper tests cover local instruction upload, approval and identity checks, replacement, persistence, removal and restrictions on deleting defaults. Local sources reach retrieval as optional context and cannot be the sole rule basis for a substantive finding.
+
+No live GCH/MDT-GPT, Windows registration, DPAPI or corporate-browser run is claimed. The expanded checklist and new jurisdiction/MDR guidance still need the trainer's target-environment acceptance run described in INSTALL_FOR_TRAINER.md. Existing saved reviews remain unchanged. The standalone synthetic layout preview is not an actual assessment.
+
 ## 8 October 2026 — v0.7.3
 
 All **141 Python tests and 44 JavaScript tests passed (185 total)**. New synthetic checks exercise incoming and forwarded emails, RTF/HTML/CSV/spreadsheet/slide/OpenDocument/ZIP text extraction; event association without an ID in patient correspondence; rejection of explicitly mismatched event IDs; bounded native download paths, freshness and duplicate checks; attachment evidence in model packets; required citations from both the event and incoming information for narrative; unreadable-file coverage; and the complete native-helper flow through Word creation and saving.

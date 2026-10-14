@@ -1,4 +1,5 @@
 // An extension-origin iframe isolates the token prompt from GCH page scripts.
+if (['https://crm.medtronic.com','https://crmstage.medtronic.com','https://cpic1cs.corp.medtronic.com:8008'].includes(window.location.origin)) {
 (() => {
   if (window !== window.top || document.getElementById('gch-check-my-work-launcher')) return;
   if (/\/bsp_wd_base\/popup/i.test(window.location.pathname)) return;
@@ -8,7 +9,7 @@
   const shadow = host.attachShadow({mode:'closed'});
   const frame = document.createElement('iframe');
   const source = chrome.runtime.getURL('panel.html');
-  frame.src = source;frame.title = 'Check my work';
+  frame.src = source+'#parent='+encodeURIComponent(window.location.origin);frame.title = 'Check my work';
   frame.style.cssText = 'border:0;width:100%;height:100%;color-scheme:light;display:block;';
   shadow.append(frame);document.documentElement.append(host);
   window.addEventListener('message', event => {
@@ -18,3 +19,4 @@
     host.style.width = width+'px';host.style.maxWidth = 'calc(100vw - 24px)';host.style.height = height+'px';
   });
 })();
+}

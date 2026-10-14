@@ -35,6 +35,32 @@ ANCHORS = {
     'consistency': [r'Event Description text info',r'Full UDI',r'Mfr Report #'],
     'closure': [r'Closed Date',r'Completed Date',r'Date Submitted'],
 }
+FIELD_ROUTES = {
+    'initial_reporter': ('intake', [r'Initial Reporter', r'Reporter (?:Name|Type|Information)']),
+    'country': ('intake', [r'Country']),
+    'notified_aware_date': ('timing', [r'Notified Date', r'Aware Date']),
+    'event_date': ('intake', [r'Event Date', r'Date of Event']),
+    'complaint_notified_date': ('intake', [r'Complaint Handling Notified', r'Complaint.*Notif']),
+    'complaint_status': ('closure', [r'Event Status', r'Complaint Status']),
+    'product_return_status': ('gfe', [r'Product Return', r'Device Status']),
+    'no_return_rationale': ('gfe', ANCHORS['gfe']),
+    'rfr': ('identifiers', [r'\bRFR\b']),
+    'brief_description': ('narrative', [r'Brief Description']),
+    'therapy': ('identifiers', [r'Therapy']),
+    'investigation_summary': ('investigation', ANCHORS['investigation']),
+    'customer_response': ('gfe', [r'Customer Response', r'Response.*Customer']),
+}
+for key, (base, patterns) in FIELD_ROUTES.items():
+    ROUTES[key] = ROUTES[base]
+    ANCHORS[key] = patterns
+for key, country in [('brazil_reporting','Brazil'), ('china_reporting','China'),
+                     ('japan_reporting','Japan'), ('korea_reporting','Korea')]:
+    ROUTES[key] = ['reportability','regulatory','mdr']
+    ANCHORS[key] = [country, r'FER', r'Reportability.*Rationale']
+for key in ['mdr_narratives','mdr_patient_device','mdr_initial_reporter',
+            'mdr_event_dates','mdr_patient_severity']:
+    ROUTES[key] = ['mdr','event','product','regulatory','reportability']
+    ANCHORS[key] = [r'MEDWATCH', r'Mfr Report #']
 @dataclass
 class Section:
     id: str

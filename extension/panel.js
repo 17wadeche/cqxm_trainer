@@ -1,7 +1,8 @@
+const parentOrigin=(()=>{try{const origin=new URL(new URLSearchParams(window.location.hash.slice(1)).get('parent')||document.referrer).origin;return ['https://crm.medtronic.com','https://crmstage.medtronic.com','https://cpic1cs.corp.medtronic.com:8008'].includes(origin)?origin:'https://crm.medtronic.com';}catch{return 'https://crm.medtronic.com';}})();
 const $=id=>document.getElementById(id);
 let tabId=null,current={phase:'idle'},expanded=false,submitting=false;
 const active=()=>['preparing','exporting','reviewing'].includes(current.phase);
-function resize(){if(window.parent!==window)window.parent.postMessage({type:'GCH_PANEL_SIZE',width:expanded?370:210,height:Math.ceil($('panel').getBoundingClientRect().height+16)},'https://crm.medtronic.com');}
+function resize(){if(window.parent!==window)window.parent.postMessage({type:'GCH_PANEL_SIZE',width:expanded?370:210,height:Math.ceil($('panel').getBoundingClientRect().height+16)},parentOrigin);}
 new ResizeObserver(resize).observe(document.body);
 async function send(message){const response=await chrome.runtime.sendMessage(message);if(!response?.ok)throw new Error(response?.error||'The check did not start. Try again.');if(response.tabId)tabId=response.tabId;return response;}
 function render(){

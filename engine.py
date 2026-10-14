@@ -3,7 +3,7 @@ import threading
 from datetime import date, datetime, timezone
 from pathlib import Path
 from uuid import uuid4
-from config import (GROUPS, ROOT, VERSION, ENVIRONMENT, RETRIEVAL_OUTPUT_TOKENS, REVIEW_OUTPUT_TOKENS,
+from config import (GROUPS, MANUAL_CHECK_IDS, REVIEW_LABELS, ROOT, VERSION, ENVIRONMENT, RETRIEVAL_OUTPUT_TOKENS, REVIEW_OUTPUT_TOKENS,
                     MAX_OUTPUT_TOKENS, MAX_CHECKS_PER_BATCH, MAX_REVIEW_REQUESTS, TARGET_INPUT_TOKENS)
 from ingest import source_from_bytes
 from mdt import MDTClient, ProviderError, response_text
@@ -129,7 +129,7 @@ class ReviewEngine:
             budget = {'remaining': MAX_REVIEW_REQUESTS}
         proc_ids = list(dict.fromkeys(d for c in checks for d in c[2]))
         record_ids = [s.id for s in evidence.sources if s.kind == 'record']
-        procedure_ids = [s.id for s in evidence.sources if s.document_id in proc_ids and s.kind == 'procedure']
+        procedure_ids = [s.id for s in evidence.sources if (s.document_id in proc_ids or s.document_id.startswith('LOCAL-')) and s.kind == 'procedure']
         query = " ".join(c[1] for c in checks)
         registry=EvidenceCatalog(evidence.sources,compact=True)
         index=RecordIndex(evidence.sources)
@@ -138,6 +138,7 @@ class ReviewEngine:
         sent=set()
         seeds=[]
         catalog = [{"source_id": s.id, "document_id": s.document_id, "revision": s.revision,
+                    "reference_role": "optional_local_context" if s.document_id.startswith("LOCAL-") else "controlled_source",
                     "kind": s.kind, "sections": len(s.chunks),
                     "outline":index.outline(s.id) if s.kind=='record' else policies.outline(s.id),"name":s.name,
                     "start": registry.add([{'source_id':s.id,'chunk_id':s.chunks[0].id,
@@ -331,9 +332,15 @@ class ReviewEngine:
         findings, extra_limits, client = [], [], None
         budget = {'remaining': MAX_REVIEW_REQUESTS}
         for idx, group in enumerate(GROUPS):
-            progress(f"Reviewing {group['name'].lower()}", 15 + idx*14)
+            progress(f"Reviewing {group['name'].lower()}", 15 + int(idx*70/len(GROUPS)))
             eligible = []
             for check in group['checks']:
+                if check[0] in MANUAL_CHECK_IDS:
+                    findings.append(Finding(check_id=check[0], record_element=check[1],
+                        what_was_done="Manual Review Needed", record_evidence=[], procedure_references=[],
+                        assessment="manual_review_needed", feedback="Manual Review Needed",
+                        priority="none", study_action=""))
+                    continue
                 missing = [d for d in check[2] if d not in by_doc]
                 if check[3] and not has_mdr:
                     missing.append('matching MDR report')
@@ -373,8 +380,10 @@ class ReviewEngine:
         if cancelled.is_set():
             raise InterruptedError("Review cancelled")
         order = {v: i for i, v in enumerate(expected)}
+        for finding in findings:
+            finding.record_element = REVIEW_LABELS[finding.check_id]
         findings.sort(key=lambda f: order[f.check_id])
-        assessed = sum(f.assessment != 'not_assessable' for f in findings)
+        assessed = sum(f.assessment not in {'not_assessable', 'manual_review_needed'} for f in findings)
         if client is None:
             evidence.model_version = "No model call — required procedure inputs missing"
         elif getattr(client, 'structured_mode', '') == 'validated_json':
@@ -385,7 +394,9 @@ class ReviewEngine:
                 evidence.model_version = 'Requested: '+connection['model']+'; gateway reported: '+', '.join(reported)
         if client is not None and getattr(client, 'tool_mode', '') == 'validated_json':
             extra_limits.append('Retrieval used a locally validated JSON plan because the gateway rejected native tool parameters. Only the same approved read-only tools were available.')
-        review = Review(overall_summary=f"{assessed} of {len(findings)} review areas have an assessment based on the available inputs. The remaining areas need additional evidence or applicable procedures. Discuss the findings and study priorities with the trainer; this is not an overall compliance determination.",
+        manual_count = sum(f.assessment == 'manual_review_needed' for f in findings)
+        automatic_count = len(findings) - manual_count
+        review = Review(overall_summary=f"{assessed} of {automatic_count} evidence-based review areas have an assessment from the available inputs. {manual_count} areas require manual review. Any unassessed evidence-based areas need additional evidence or applicable procedures. Discuss the findings and study priorities with the trainer; this is not an overall compliance determination.",
                         limitations=list(dict.fromkeys(extra_limits)), findings=findings)
         validate_traceability(review, evidence)
         progress("Creating the Word report", 92)

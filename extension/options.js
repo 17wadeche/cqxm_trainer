@@ -9,7 +9,15 @@ function paint(info){
     row.textContent=p.id+' — '+p.name+': '+(loaded?'Revision '+loaded.revision+' · '+(loaded.origin==='bundled'?'Included default':'Uploaded revision'):'Not loaded');$('references').append(row);
     for(const note of loaded?.warnings||[]){const n=document.createElement('p');n.className='support';n.textContent=note;$('references').append(n);}
   }
-  $('status').textContent=info.missing_procedures.length?(info.procedure_setup_errors?.[0]||info.missing_procedures.length+' procedures still needed.'):'All six training procedures are ready. Use Check my work in GCH.';
+  $('local-references').replaceChildren();
+  for(const p of info.procedures.filter(p=>p.document_id.startsWith('LOCAL-'))){
+    const row=document.createElement('p'),remove=document.createElement('button');
+    row.textContent=p.document_id.slice(6)+' · Revision '+p.revision+' · '+p.name+' ';
+    remove.type='button';remove.textContent='Remove';remove.addEventListener('click',()=>run(remove,async()=>paint(await call('remove_local_procedure',{source_id:p.id}))));
+    row.append(remove);$('local-references').append(row);
+    for(const note of p.warnings||[]){const n=document.createElement('p');n.className='support';n.textContent=note;$('local-references').append(n);}
+  }
+  $('status').textContent=info.missing_procedures.length?(info.procedure_setup_errors?.[0]||info.missing_procedures.length+' procedures still needed.'):'All default training procedures are ready. Use Check my work in GCH.';
 }
 async function run(button,work){button.disabled=true;try{await work();}catch(e){$('status').textContent=e.message;}finally{button.disabled=false;}}
 function read(file){return new Promise((resolve,reject)=>{if(!file||file.size>20*1024*1024)return reject(new Error('Choose a file smaller than 20 MB.'));const reader=new FileReader();reader.onload=()=>resolve({name:file.name,data:String(reader.result).split(',')[1]});reader.onerror=()=>reject(new Error('Could not read the file.'));reader.readAsDataURL(file);});}
@@ -17,3 +25,4 @@ $('procedure-form').addEventListener('submit',e=>{e.preventDefault();run($('add'
 $('settings-form').addEventListener('submit',e=>{e.preventDefault();run($('save'),async()=>{paint(await call('settings',{model:$('model').value,auth_style:$('auth').value,downloads:$('downloads').value}));$('status').textContent='Settings saved.';});});
 $('clear').addEventListener('click',()=>run($('clear'),async()=>{await call('clear_token');$('status').textContent='API token forgotten. GCH will ask for it on the next check.';}));
 call('status').then(paint).catch(e=>$('status').textContent=e.message);
+$('local-form').addEventListener('submit',e=>{e.preventDefault();run($('local-add'),async()=>{paint(await call('local_procedure',{document_id:$('local-id').value,revision:$('local-revision').value,approved:$('local-approved').checked,file:await read($('local-file').files[0])}));$('local-form').reset();$('status').textContent='Local instruction saved for future reviews.';});});

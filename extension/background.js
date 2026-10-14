@@ -1,6 +1,8 @@
 import {recordContext, actionInFrame, attachmentsInFrame} from './gch-dom.mjs';
-const HOST='com.gch.check_my_work', GCH='https://crm.medtronic.com/';
-const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const GCH_ORIGINS=['https://crm.medtronic.com','https://crmstage.medtronic.com','https://cpic1cs.corp.medtronic.com:8008'];
+const GCH_PATTERNS=GCH_ORIGINS.map(origin=>new URL(origin).protocol+'//'+new URL(origin).hostname+'/*');
+function isGCH(value){try{return GCH_ORIGINS.includes(new URL(value).origin);}catch{return false;}}
+const HOST='com.gch.check_my_work';const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 let nativePort=null, sequence=0, startBusy=false, downloadQueue=Promise.resolve();
 const pending=new Map(), polling=new Set();
 function native(method,data={}) {
@@ -89,15 +91,15 @@ async function fail(tabId,error){
   return update(tabId,{phase:'error',message:error.message||String(error)});
 }
 async function tabFor(sender){return sender.tab||(await chrome.tabs.query({active:true,currentWindow:true}))[0];}
-async function permittedFrames(tabId){return((await chrome.webNavigation.getAllFrames({tabId}))||[]).filter(f=>f.url.startsWith(GCH)).map(f=>f.frameId);}
+async function permittedFrames(tabId){return((await chrome.webNavigation.getAllFrames({tabId}))||[]).filter(f=>isGCH(f.url)).map(f=>f.frameId);}
 const navigationKey=tabId=>'gch-navigation-'+tabId;
 const parentKey=tabId=>'gch-parent-'+tabId;
 chrome.webNavigation.onCreatedNavigationTarget.addListener(details=>{
-  if(!details.url.startsWith(GCH)&&details.url!=='about:blank')return;
+  if(!isGCH(details.url)&&details.url!=='about:blank')return;
   chrome.storage.session.set({[parentKey(details.tabId)]:{parent:details.sourceTabId,at:Date.now()}}).catch(()=>{});
 });
 chrome.webNavigation.onBeforeNavigate.addListener(details=>{
-  if(details.frameId!==0||!details.url.startsWith(GCH))return;
+  if(details.frameId!==0||!isGCH(details.url))return;
   chrome.storage.session.set({[navigationKey(details.tabId)]:{at:Date.now()}}).catch(()=>{});
 });
 chrome.tabs.onRemoved.addListener(tabId=>{
@@ -109,13 +111,13 @@ async function navigationInfo(tabId){
   return{parent:parent[parentKey(tabId)]?.parent,at:Math.max(parent[parentKey(tabId)]?.at||0,nav[navigationKey(tabId)]?.at||0)};
 }
 async function reportTabs(active){
-  const tabs=await chrome.tabs.query({url:GCH+'*'});
+  const tabs=await chrome.tabs.query({url:GCH_PATTERNS});
   const nodes=await Promise.all(tabs.map(async tab=>({tab,nav:await navigationInfo(tab.id)})));
   const related=new Set([active.tabId]);
   for(let depth=0;depth<5;depth++){
     let changed=false;
     for(const {tab,nav} of nodes){
-      if(related.has(tab.id)||!tab.url?.startsWith(GCH))continue;
+      if(related.has(tab.id)||!isGCH(tab.url))continue;
       const fresh=!(active.existingTabIds||[]).includes(tab.id)||nav.at>=active.started;
       const parent=Number.isInteger(tab.openerTabId)?tab.openerTabId:nav.parent;
       if(fresh&&related.has(parent)){related.add(tab.id);changed=true;}
@@ -125,7 +127,7 @@ async function reportTabs(active){
   return [...related];
 }
 async function context(tab){
-  if(!tab?.id||!tab.url?.startsWith(GCH))throw new Error('Open a product event in GCH first.');
+  if(!tab?.id||!isGCH(tab.url))throw new Error('Open a product event in GCH first.');
   const frameIds=await permittedFrames(tab.id);
   if(!frameIds.length)throw new Error('GCH is still loading. Try again in a moment.');
   const frames=await chrome.scripting.executeScript({target:{tabId:tab.id,frameIds},func:recordContext});
@@ -278,7 +280,7 @@ async function start(tab){
     if(!setup.token_present)return update(tab.id,{phase:'token',environment:'production',rememberSupported:setup.remember_supported,message:'Enter your MDT-GPT token to start. You only need to do this once if you choose Remember.'});
     const lease=await native('capture_start',{record_id:ctx.recordId,stage:ctx.stage});
     if((await state(tab.id)).runId!==runId){await native('capture_cancel',{capture_id:lease.capture_id});return state(tab.id);}
-    const existingTabIds=(await chrome.tabs.query({url:GCH+'*'})).map(t=>t.id);
+    const existingTabIds=(await chrome.tabs.query({url:GCH_PATTERNS})).map(t=>t.id);
     const activeCapture={captureId:lease.capture_id,tabId:tab.id,recordId:ctx.recordId,existingTabIds,started:Date.now(),downloadId:null,processing:false,requestedDownload:false,role:'collecting',attachmentDownloadIds:[]};
     await chrome.storage.session.set({capture:activeCapture});
     await chrome.alarms.create('capture-expiry',{when:Date.now()+((lease.expires_in||900)-10)*1000});
@@ -305,7 +307,7 @@ async function start(tab){
   }catch(error){await fail(tab.id,error);return state(tab.id);}
   finally{startBusy=false;}
 }
-function fromGCH(item){return[item.url,item.finalUrl,item.referrer].some(value=>{try{return new URL(value).origin===new URL(GCH).origin;}catch{return false;}});}
+function fromGCH(item){return[item.url,item.finalUrl,item.referrer].some(value=>{try{return isGCH(value);}catch{return false;}});}
 async function consider(item){
   const active=await capture();
   if(!active||active.processing||!fromGCH(item)||!Number.isFinite(Date.parse(item.startTime))||Date.parse(item.startTime)<active.started-2000)return;
@@ -356,6 +358,7 @@ chrome.downloads.onChanged.addListener(change=>{
   }).catch(()=>{});
 });
 chrome.webRequest.onHeadersReceived.addListener(details=>{
+  if(!isGCH(details.url))return;
   const contentType=details.responseHeaders?.find(h=>h.name.toLowerCase()==='content-type')?.value||'';
   const html=/^text\/html(?:;|$)/i.test(contentType)&&new URL(details.url).pathname.toLowerCase().startsWith('/sap/bc/contentserver/');
   const unavailable=details.statusCode===503;
@@ -393,7 +396,7 @@ chrome.webRequest.onHeadersReceived.addListener(details=>{
     }
     catch{await scheduleDownloadRetry(active,{url:details.url});}
   },800);
-},{urls:[GCH+'*']},['responseHeaders']);
+},{urls:GCH_PATTERNS},['responseHeaders']);
 async function follow(tabId,jobId){
   if(polling.has(jobId))return;polling.add(jobId);
   try{
@@ -421,11 +424,11 @@ chrome.runtime.onMessage.addListener((message,sender,sendResponse)=>{
     if(message.type==='OPEN_SETUP'){await chrome.runtime.openOptionsPage();return{};}
     if(message.type==='ADMIN'){
       if(sender.url!==chrome.runtime.getURL('options.html'))throw new Error('Open training setup to change these settings.');
-      if(!['status','settings','procedure','clear_token'].includes(message.method))throw new Error('Unsupported setting.');
+      if(!['status','settings','procedure','local_procedure','remove_local_procedure','clear_token'].includes(message.method))throw new Error('Unsupported setting.');
       return native(message.method,message.data||{});
     }
     const tab=await tabFor(sender);
-    if(!tab?.id||!tab.url?.startsWith(GCH))throw new Error('Open a product event in GCH first.');
+    if(!tab?.id||!isGCH(tab.url))throw new Error('Open a product event in GCH first.');
     if(message.type==='GET_STATE'){const current=await state(tab.id);if(current.phase==='reviewing')void follow(tab.id,current.jobId);return{tabId:tab.id,state:current};}
     if(message.type==='START')return{tabId:tab.id,state:await start(tab)};
     if(message.type==='TOKEN'){await native('token',{token:message.token,remember:message.remember,environment:'production'});return{tabId:tab.id,state:await start(tab)};}

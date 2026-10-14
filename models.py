@@ -17,7 +17,7 @@ class Finding(StrictModel):
     procedure_references: list[Citation]
     assessment: Literal[
         "done_properly", "needs_trainer_review", "potential_gap",
-        "not_assessable", "not_applicable"
+        "not_assessable", "not_applicable", "manual_review_needed"
     ]
     feedback: str = Field(min_length=1, description="One or two short sentences, usually 15-30 words, for a new learner: what this means and what to check next. Use everyday words; explain necessary jargon. Preserve essential uncertainty. These are soft targets; longer explanations are allowed when essential. Never truncate evidence or qualifications.")
     priority: Literal["high", "medium", "low", "none"]
@@ -91,14 +91,24 @@ def validate_traceability(review: Review, evidence: EvidenceManifest) -> None:
         chunk = next((c for c in source.chunks if c.id == ref.chunk_id), None)
         if chunk is None or _norm(ref.quote) not in _norm(chunk.text):
             raise ValueError(f"Unverified excerpt: {ref.source_id}/{ref.chunk_id}")
+    from config import MANUAL_CHECK_IDS
     for finding in review.findings:
+        if finding.check_id in MANUAL_CHECK_IDS or finding.assessment == 'manual_review_needed':
+            if (finding.check_id not in MANUAL_CHECK_IDS or finding.assessment != 'manual_review_needed'
+                or finding.what_was_done != 'Manual Review Needed' or finding.feedback != 'Manual Review Needed'
+                or finding.record_evidence or finding.procedure_references
+                or finding.priority != 'none' or finding.study_action):
+                raise ValueError('Manual review rows must remain fixed and unassessed')
+            continue
         for ref in finding.record_evidence:
             check_ref(ref, "record")
         for ref in finding.procedure_references:
             check_ref(ref, "procedure")
         if finding.assessment != "not_assessable":
-            if not finding.record_evidence or not finding.procedure_references:
+            if not finding.record_evidence or not finding.procedure_references or all(sources[r.source_id].document_id.startswith('LOCAL-') for r in finding.procedure_references):
                 raise ValueError(f"{finding.check_id}: assessment requires record and rule evidence")
+            if finding.check_id.startswith('mdr_') and not any(sources[r.source_id].document_id=='MDR' for r in finding.record_evidence):
+                raise ValueError('MDR field assessment requires matching MDR evidence')
             if finding.check_id=='consistency':
                 cited={sources[r.source_id].document_id for r in finding.record_evidence}
                 if 'MDR' not in cited or not cited.intersection({'DER','PESR'}):

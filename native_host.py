@@ -61,7 +61,7 @@ class NativeService:
         sources = self.app.repo.catalog()
         return {'version':VERSION, 'token_present': bool(self.app.connection['token']),
                 'remember_supported': self.vault.supported,
-                'missing_procedures': [d for d, _ in PROCEDURES[:6]
+                'missing_procedures': [d for d, _ in PROCEDURES
                                        if d not in {p['document_id'] for p in sources}],
                 'procedures': sources, 'model': self.app.connection['model'],
                 'procedure_setup_errors': self.app.procedure_setup_errors,
@@ -74,7 +74,7 @@ class NativeService:
         if not state['token_present']:
             raise ValueError('Enter your MDT-GPT token to continue.')
         if state['missing_procedures']:
-            raise ValueError('Your trainer needs to add the six training procedures before you can check your work.')
+            raise ValueError('Your trainer needs to add the default training procedures before you can check your work.')
     def verify_token(self, data):
         token = checked_text(data.get('token'), 'your MDT-GPT token', 8192)
         if '\r' in token or '\n' in token:
@@ -149,6 +149,34 @@ class NativeService:
                                            tested=False, structured_mode='auto')
                 self.app.downloads = folder
                 self.app.persist_preferences()
+            return self.status()
+        if method == 'remove_local_procedure':
+            source_id = checked_text(data.get('source_id'), 'the local instruction', 80)
+            if not any(s.id == source_id and s.document_id.startswith('LOCAL-')
+                       for s, _ in self.app.repo.active_procedures()):
+                raise ValueError('Choose an active local instruction to remove.')
+            self.app.repo.remove(source_id)
+            return self.status()
+        if method == 'local_procedure':
+            document_id = checked_text(data.get('document_id'), 'the local document ID', 34).upper()
+            if not re.fullmatch(r'[A-Z0-9][A-Z0-9_-]{0,33}', document_id):
+                raise ValueError('Use letters, numbers, underscores or hyphens for the local document ID.')
+            if document_id in {i for i, _ in PROCEDURES} or document_id.startswith('LOCAL-'):
+                raise ValueError('Use Update a procedure for a default document; enter a local document ID without LOCAL-.')
+            if data.get('approved') is not True:
+                raise ValueError('Confirm that this local revision is approved for training context.')
+            revision = checked_text(data.get('revision'), 'the local revision', 80)
+            name, payload = file_payload(data.get('file'))
+            source, warnings = source_from_bytes(name, payload, str(uuid4()), 'procedure', 'LOCAL-'+document_id,
+                                                 revision=revision, approved=True)
+            normalized = re.sub(r'\W', '', '\n'.join(c.text for c in source.chunks)).upper()
+            if re.sub(r'\W', '', document_id) not in normalized:
+                raise ValueError('The local document ID was not found in the file.')
+            with self.app.repo.lock:
+                local = [s for s, _ in self.app.repo.active_procedures() if s.document_id.startswith('LOCAL-')]
+                if len(local) >= 20 and not any(s.document_id == source.document_id for s in local):
+                    raise ValueError('Remove a local instruction before adding more than 20.')
+                self.app.repo.put(source, warnings)
             return self.status()
         if method == 'procedure':
             document_id = checked_text(data.get('document_id'), 'the document ID', 40)

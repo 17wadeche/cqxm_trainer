@@ -56,6 +56,7 @@ class EvidenceCatalog:
         schema=DraftReview.model_json_schema()
         fields=schema['$defs']['DraftFinding']['properties']
         fields['check_id']['enum']=list(expected)
+        fields['assessment']['enum']=[v for v in fields['assessment']['enum'] if v != 'manual_review_needed']
         for field,kind in [('record_evidence','record'),('procedure_references','procedure')]:
             fields[field]['description']='Select supplied '+kind+' evidence IDs. Do not write quotes, source IDs or citation objects.'
             if self.ids(kind):fields[field]['items']['enum']=self.ids(kind)
@@ -111,6 +112,7 @@ def validation_issues(error, expected):
         return issues
     message=str(error)
     mappings=[
+        ('MDR field assessment requires matching MDR evidence', 'missing_mdr_citations', 'Cite the matching MDR form for this field, or use not_assessable when that field cannot be verified.'),
         ('narrative: assessment requires event and incoming attachment evidence','missing_incoming_citations','For narrative, cite both the saved event and the incoming attachment information. Use not_assessable if the comparison cannot be established.'),
         ('consistency: assessment requires event and MDR evidence','missing_cross_record_citations','Cite both primary event-record evidence and linked MDR evidence for a cross-record assessment. Use not_assessable when either side is unavailable.'),
         ('Duplicate check IDs','checklist_coverage','Return each expected check ID exactly once: '+', '.join(expected)+'.'),

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "selection": "User-selected default training procedures, supplied 2026-09-28.",
+  "selection": "User-selected default training procedures, including Brazil, China, Japan, South Korea and US MDR 3500A completion guidance.",
   "procedures": [
     {
       "document_id": "027-P043",
@@ -43,6 +43,41 @@
       "pdf": "054-WI198_P_EN.pdf",
       "index": "054-WI198.json",
       "sha256": "2fd2dd420bd39059e67b4740b35961512a5aab4d7edc8c2a2c628f312020a580"
+    },
+    {
+      "document_id": "D00788856",
+      "revision": "G",
+      "file": "D00788856_G_EN.docx",
+      "index": "D00788856.json",
+      "sha256": "b3c1477438506bf1e05f365669e2be256378edc3c3da8a5305fcc766a742479d"
+    },
+    {
+      "document_id": "054-WI204",
+      "revision": "M",
+      "file": "054-WI204_M_EN.pdf",
+      "index": "054-WI204.json",
+      "sha256": "2b8dad0d97a826c25156e27c0b6df6c190c69e8df2682e252100883af1ed07b3"
+    },
+    {
+      "document_id": "D00780699",
+      "revision": "D",
+      "file": "D00780699_D_EN.pdf",
+      "index": "D00780699.json",
+      "sha256": "4481a2a58212440519dd44712f03bc46c1cb48c1d3518c603476e0b76728df9e"
+    },
+    {
+      "document_id": "D00780668",
+      "revision": "F",
+      "file": "D00780668_F_EN.pdf",
+      "index": "D00780668.json",
+      "sha256": "eb5f0ceefa3a1475d512617cbb0c0886512a8586afed78d4e940e27892ee9aca"
+    },
+    {
+      "document_id": "D00780698",
+      "revision": "E",
+      "file": "D00780698_E_EN.pdf",
+      "index": "D00780698.json",
+      "sha256": "5ff0223eef6908f8006cb010f6ba5aab1d90e08783a0a23ed460bbae2f260a44"
     }
   ]
 }

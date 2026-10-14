@@ -15,7 +15,9 @@
     "webNavigation"
   ],
   "host_permissions": [
-    "https://crm.medtronic.com/*"
+    "https://crm.medtronic.com/*",
+        "https://crmstage.medtronic.com/*",
+        "https://cpic1cs.corp.medtronic.com/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -24,7 +26,9 @@
   "content_scripts": [
     {
       "matches": [
-        "https://crm.medtronic.com/*"
+        "https://crm.medtronic.com/*",
+        "https://crmstage.medtronic.com/*",
+        "https://cpic1cs.corp.medtronic.com/*"
       ],
       "js": [
         "content.js"
@@ -38,7 +42,9 @@
         "panel.html"
       ],
       "matches": [
-        "https://crm.medtronic.com/*"
+        "https://crm.medtronic.com/*",
+        "https://crmstage.medtronic.com/*",
+        "https://cpic1cs.corp.medtronic.com/*"
       ]
     }
   ],

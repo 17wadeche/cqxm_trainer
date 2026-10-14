@@ -1,10 +1,20 @@
-# GCH Check my work — version 0.7.3
+# GCH Check my work — version 0.8.0
 
 A floating button at the top right of GCH. Click **Check my work**, enter an MDT-GPT token if prompted, and open the concise Word training review when it is ready. Report selection, download, source retrieval and review run in the background.
 
 - Trainees: QUICK_START.md.
 - Trainer / IT installer: INSTALL_FOR_TRAINER.md.
 - Test scope and remaining live verification: VALIDATION.md.
+
+## Review areas and local instructions in 0.8.0
+
+New reviews follow the [46 review areas](REVIEW_AREAS.md) in the supplied screenshot order. The 19 red areas remain visible with **Manual Review Needed** merged across their report row; they never enter a model assessment. The remaining 27 areas are checked individually when their evidence and applicable procedures are available. Notified/Aware Date, Event Date and Complaint Handling Notified Date are separate checks. Country-specific FER/rationale and named MDR sections have their own evidence routes. Missing MDRs or procedures leave the dependent areas not assessable; inapplicability requires cited evidence. Saved reviews remain unchanged. The per-review request cap is 160 to support the expanded checklist, including separate retrieval, drafting and verification; larger reviews can take longer and use more tokens.
+
+The extension supports `https://crm.medtronic.com`, `https://crmstage.medtronic.com` and `https://cpic1cs.corp.medtronic.com:8008`, including their SAP start paths. The two test GCH sites continue to use the existing MDT-GPT Production endpoint, model and authentication. Reload the extension and restart Chrome after updating the helper; the extension identity is unchanged.
+
+The eleven defaults include the original six plus **D00780668 F** (Brazil), **054-WI204 M** (China), **D00780698 E** (Japan), **D00780699 D** (South Korea), and **D00788856 G** (US MDR 3500A completion guidance). Original files and checked extraction indexes are bundled, including the supplied DOCX. MDR table-row extraction retains the field label, guidance and nested cells together. PDF diagrams, rotated text and form marks still need visual review where relevant.
+
+In **Documents & settings → Local work instructions (optional)**, enter a local document ID and revision, choose a PDF, DOCX or text file, and confirm approval for training context. Up to 20 local instructions can be stored, 20 MB per file. Uploading the same local ID replaces its active revision; Remove excludes it from future reviews. Local instructions persist across restarts and updates, are available to evidence retrieval, and may be cited as additional context. They cannot replace missing default procedures, override controlled rules or enable AI review of manual-only areas. Relevant text is sent to MDT-GPT with the review. Existing reports and source history are retained.
 
 ## Incoming information and clearer feedback in 0.7.3
 
@@ -70,7 +80,7 @@ The helper extracts a heading-based outline with original PDF pages and source h
 
 The existing **128,000-token application budget** remains a conservative configuration, not a verified statement of GPT-5.6-terra's deployment limit. Target input is approximately 60,000 estimated tokens, with a 96,000 ceiling, output reservation and 8,192 tokens of headroom. The complete Responses payload is estimated locally and calibrated upward by reported usage. The old provider's token-count endpoint is no longer called. Explicit input-context errors restart a batch with a fresh smaller packet, at most twice. A lower actual deployment limit may require reducing these values after confirmation by the MDT-GPT owner.
 
-The short Word format remains the default: all 13 review areas and up to five study priorities, with brief procedure references and material uncertainty. Page count is not forced. Full findings, source excerpts and coverage are saved locally in `review.json`, `evidence.json`, `retrieval_coverage.json` and `context_usage.json`.
+The short Word format remains the default: all 46 review areas and up to five study priorities, with brief procedure references and material uncertainty. Page count is not forced. Full findings, source excerpts and coverage are saved locally in `review.json`, `evidence.json`, `retrieval_coverage.json` and `context_usage.json`.
 
 The optional detailed format can be rendered from a completed review without another model call:
 

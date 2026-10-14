@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-VERSION = "0.7.3"
+VERSION = "0.8.0"
 ENVIRONMENT = 'production'
 PROVIDER = 'openai_responses'
 ENDPOINT = 'https://api.gpt.medtronic.com/providers/openai/v1/responses'
@@ -22,7 +22,7 @@ RETRIEVAL_OUTPUT_TOKENS = 4096
 REVIEW_OUTPUT_TOKENS = 8192
 MAX_OUTPUT_TOKENS = 16384
 MAX_CHECKS_PER_BATCH = 5
-MAX_REVIEW_REQUESTS = 80
+MAX_REVIEW_REQUESTS = 160
 ROOT = Path(__file__).resolve().parent
 BUNDLED_PROCEDURES = ROOT / 'procedures'
 def data_directory():
@@ -39,29 +39,69 @@ PROCEDURES = [
     ("027-WI188", "Customer Communication and Good Faith Effort"),
     ("054-P044", "Regulatory Reporting"),
     ("054-WI198", "US MDR Reportability and Reporting"),
+    ("D00780668", "Brazil Reporting"),
+    ("054-WI204", "China Reporting"),
+    ("D00780698", "Japan Reporting"),
+    ("D00780699", "South Korea Reporting"),
+    ("D00788856", "US MDR 3500A Completion Guidance"),
 ]
-GROUPS = [
-    {"name": "Intake and coding", "checks": [
-        ("intake", "Event intake and complaint determination", ["027-P043", "027-WI185"], False),
-        ("narrative", "Event narrative quality and objectivity", ["027-WI185"], False),
-        ("identifiers", "Product identifiers and event details", ["027-WI185"], False),
-        ("coding", "Event coding and reported allegations", ["027-WI185"], False),
-        ("harm", "Harm coding and patient impact consistency", ["027-WI185"], False),
-    ]},
-    {"name": "Communication", "checks": [
-        ("gfe", "Good faith effort and communication documentation", ["027-WI188", "027-WI185"], False),
-    ]},
-    {"name": "Investigation", "checks": [
-        ("investigation", "Investigation decision and further action rationale", ["027-WI186"], False),
-        ("cause", "Cause determination and conclusion consistency", ["027-WI186"], False),
-    ]},
-    {"name": "US MDR", "checks": [
-        ("reportability", "US reportability decision and rationale", ["054-P044", "054-WI198"], False),
-        ("timing", "US MDR reporting dates and timing", ["054-WI198", "054-P044"], False),
-        ("consultation", "Medical judgment consultation documentation", ["054-WI198", "027-WI186"], False),
-    ]},
-    {"name": "Consistency and closure", "checks": [
-        ("consistency", "Consistency between the event record and MDR versions", ["027-WI185"], True),
-        ("closure", "Closure sequencing for the recorded stage", ["027-P043"], False),
-    ]},
-]
+REVIEW_AREAS = [('narrative', 'Event Summary', ['027-WI185'], False),
+ ('initial_reporter', 'Initial Reporter', ['027-WI185'], False),
+ ('country', 'Country', ['027-WI185'], False),
+ ('manual_communication', 'Communication Needed', None, False),
+ ('notified_aware_date', 'Notified Date/Aware Date', ['027-WI185', '054-P044'], False),
+ ('event_date', 'Event Date', ['027-WI185'], False),
+ ('complaint_notified_date', 'Complaint Handling Notified Date', ['027-WI185'], False),
+ ('manual_record_count', 'Correct number of complaint records generated', None, False),
+ ('harm', 'Patient outcome', ['027-WI185'], False),
+ ('manual_plis', 'PLIs (correct ones and amount)', None, False),
+ ('manual_manufacturing_site', 'Manufacturing Site ID', None, False),
+ ('complaint_status', 'Complaint Status', ['027-P043'], False),
+ ('identifiers', 'Lot/Serial #', ['027-WI185'], False),
+ ('product_return_status', 'Product Return Status', ['027-WI185', '027-WI188'], False),
+ ('no_return_rationale', 'Rationale for No Return', ['027-WI188', '027-WI185'], False),
+ ('rfr', 'RFR', ['027-WI185'], False),
+ ('manual_fdp', 'FDP', None, False),
+ ('manual_haz', 'HAZ', None, False),
+ ('manual_afc', 'AFC', None, False),
+ ('manual_fdm', 'FDM', None, False),
+ ('manual_fdr', 'FDR', None, False),
+ ('manual_fdc', 'FDC', None, False),
+ ('manual_ime', 'IME', None, False),
+ ('manual_imf', 'IMF', None, False),
+ ('manual_img', 'IMG', None, False),
+ ('brief_description', 'Brief Description', ['027-WI185'], False),
+ ('therapy', 'Therapy', ['027-WI185'], False),
+ ('manual_analysis_transaction', 'Product Analysis Transaction', None, False),
+ ('reportability', 'Reportability Decision', ['054-P044', '054-WI198'], False),
+ ('brazil_reporting', 'Brazil FER & Rationale', ['D00780668', '054-P044'], False),
+ ('china_reporting', 'China FER & Rationale', ['054-WI204', '054-P044'], False),
+ ('japan_reporting', 'Japan FER & Rationale', ['D00780698', '054-P044'], False),
+ ('korea_reporting', 'Korea FER & Rationale', ['D00780699', '054-P044'], False),
+ ('mdr_narratives', 'MDR narratives (Sections B5-B7, H11)', ['D00788856', '054-WI198'], True),
+ ('mdr_patient_device',
+  'Patient/Device information in MDR (Sections A, D, H3-5, H7-9, G1-2, G5)',
+  ['D00788856'],
+  True),
+ ('mdr_initial_reporter',
+  'Initial Reporter information in MDR (Sections E and G2)',
+  ['D00788856'],
+  True),
+ ('manual_mdr_coding', 'Coding in MDR (Section H6)', None, False),
+ ('mdr_event_dates', 'Event-related dates in MDR (B3, B4, G3)', ['D00788856', '054-WI198'], True),
+ ('mdr_patient_severity',
+  'Patient severity identified in MDR (Sections B1, B2, G7, H1, H2)',
+  ['D00788856', '054-WI198'],
+  True),
+ ('manual_investigation_determination', 'Investigation determination', None, False),
+ ('manual_related_investigation', 'Existing or related investigation reference', None, False),
+ ('manual_technical_assessment', 'Technical Assessment/Review', None, False),
+ ('manual_no_investigation_rationale', 'Rationale for no formal investigation', None, False),
+ ('investigation_summary', 'Investigation Summary', ['027-WI186'], False),
+ ('gfe', 'Good Faith Effort', ['027-WI188', '027-WI185'], False),
+ ('customer_response', 'Customer response', ['027-WI188'], False)]
+MANUAL_CHECK_IDS = {row[0] for row in REVIEW_AREAS if row[2] is None}
+REVIEW_LABELS = {row[0]: row[1] for row in REVIEW_AREAS}
+GROUPS = [{"name": f"Review areas {start+1}–{min(start+5, len(REVIEW_AREAS))}",
+           "checks": [(key, label, docs or [], mdr) for key, label, docs, mdr in REVIEW_AREAS[start:start+5]]}
+          for start in range(0, len(REVIEW_AREAS), 5)]
