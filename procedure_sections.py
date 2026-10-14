@@ -31,10 +31,10 @@ for key, docid in [('brazil_reporting','D00780668'), ('china_reporting','054-WI2
     FOCUS[key] = {docid: [r'.*'], '054-P044': [r'.*']}
 MDR_FIELDS = {
     'mdr_narratives': r'^(?:B[567]|H11):',
-    'mdr_patient_device': r'^(?:A[1-9]?|D[0-9]*|H[345789]|G[125]):',
+    'mdr_patient_device': r'^(?:A[1-9]?|D[0-9]+[ab]?|H[345789]|G[125])(?=\s|:)',
     'mdr_initial_reporter': r'^(?:E[0-9]*|G2):',
     'mdr_event_dates': r'^(?:B[34]|G3):',
-    'mdr_patient_severity': r'^(?:B[12]|G7|H[12]):',
+    'mdr_patient_severity': r'^(?:B[12]|G7|H[12])(?=\s|:)',
 }
 for key, fields in MDR_FIELDS.items():
     FOCUS[key] = {'D00788856': [fields, r'^Overview and processing considerations']}

@@ -23,7 +23,7 @@ def split_text(text, size=2400, overlap=180):
         yield text[:stop].strip()
         text = text[max(1, stop-overlap):].strip()
 def _docx_blocks(parent, prefix="Body"):
-    element = parent.element.body if hasattr(parent, "element") else parent._tc
+    element = parent.element.body if hasattr(parent, "element") else parent._element
     index = 0
     for child in element.iterchildren():
         index += 1
@@ -83,10 +83,15 @@ def extract(name, data, *, depth=0):
             doc = Document(io.BytesIO(data))
             blocks.extend(_docx_blocks(doc))
             for number, section in enumerate(doc.sections, 1):
-                for label, component in [("header", section.header), ("footer", section.footer)]:
-                    for p in component.paragraphs:
-                        if p.text.strip():
-                            blocks.append((f"Section {number} {label}", p.text))
+                components = [("header", section.header), ("footer", section.footer)]
+                if section.different_first_page_header_footer:
+                    components += [("first-page header", section.first_page_header),
+                                   ("first-page footer", section.first_page_footer)]
+                if doc.settings.odd_and_even_pages_header_footer:
+                    components += [("even-page header", section.even_page_header),
+                                   ("even-page footer", section.even_page_footer)]
+                for label, component in components:
+                    blocks.extend(_docx_blocks(component, f"Section {number} {label}"))
         except BadZipFile as exc:
             raise ValueError("This file does not contain a valid DOCX.") from exc
     elif ext == ".txt":
@@ -126,7 +131,7 @@ def verify_record(chunks, record_id, kind):
     value_pattern=r'\d{6,12}(?:-\d{1,4})?' if record_id.isdigit() else r'[A-Za-z0-9_-]{3,40}'
     labeled = re.findall(r"\b(?:product\s+event(?:\s+(?:transaction\s+id|id|number|no\.?))?|event\s+id|PE\s*(?:id|number)?)\s*[:#=]+\s*("+value_pattern+r")", full, re.I)
     labeled += re.findall(r"\b(?:event\s+id|product\s+event\s+transaction\s+id)\s+(\d{6,12})\b",full,re.I)
-    def matches(value):
+    def matches(value):   
         return value==record_id or (record_id.isdigit() and bool(re.fullmatch(r'0*'+re.escape(record_id)+r'(?:-\d{1,4})?',value)))
     if labeled and any(not matches(value) for value in labeled):
         raise ValueError("The report contains a different labeled event ID. Verify the selected GCH record and export.")
@@ -162,3 +167,4 @@ def source_from_bytes(name, data, source_id, kind, document_id, record_id=None,
         document_id=document_id, record_id=record_id, revision=revision,
         approved_revision=approved, file_sha256=hashlib.sha256(data).hexdigest(),
         extracted_text_sha256=extracted_digest(chunks), chunks=chunks), warnings
+    
