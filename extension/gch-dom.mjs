@@ -48,7 +48,7 @@ export function attachmentsInFrame(command='scan', key=null) {
     const links=[...cell.querySelectorAll('a,button,[role="button"]')].filter(visible);
     const fingerprint=JSON.stringify([name,type,norm(row.textContent)]);
     const media=/\.(jpe?g|png|gif|bmp|tiff?|webp|heic|svg|mp4|mov|avi|mkv|wmv|mpe?g|webm|m4v)$/i.test(name)||/^(image|video)\//i.test(type)||/\b(image|video|movie)\b/i.test(type)||/^(jpe?g|png|gif|bmp|tiff?|mp4|mov|avi)$/i.test(type);
-    return {key:fingerprint,name,type,excluded:media,downloadable:links.length===1,links};
+    return {key:fingerprint,name,type,excluded:media||/^url$/i.test(type),downloadable:links.length===1,links};
   }).filter(row=>row.name);
   const footer=document.getElementById(table.id.replace(/_TableHeader$/,'-footer'));
   const controls=footer?[...footer.querySelectorAll('a,button,[role="button"],input[type="button"]')].filter(visible):[];

@@ -188,7 +188,10 @@ async function collectAttachments(active){
     if(pages.has(page.pageKey))throw new Error('Attachment pagination repeated a page. The complete list could not be collected.');
     pages.add(page.pageKey);
     for(const row of page.rows){
-      if(row.excluded)continue;
+      if(row.excluded){
+        limits.push('Incoming attachment '+row.name.slice(0,180)+' could not be reviewed: images, videos and URL attachments are excluded.');
+        continue;
+      }
       if(seen.has(row.key))throw new Error('Duplicate attachment rows cannot be identified uniquely. Ask your trainer to check the table.');
       if(seen.size>=100)throw new Error('This event exceeds 100 text attachments. Review the remaining files with your trainer.');
       seen.add(row.key);
