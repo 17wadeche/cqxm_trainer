@@ -37,7 +37,7 @@ MDR_FIELDS = {
     'mdr_patient_severity': r'^(?:B[12]|G7|H[12])(?=\s|:)',
 }
 for key, fields in MDR_FIELDS.items():
-    FOCUS[key] = {'D00788856': [fields, r'^Overview and processing considerations']}
+    FOCUS[key] = {'027-WI185': [fields, r'^Overview and processing considerations']}
     if key in {'mdr_narratives','mdr_event_dates','mdr_patient_severity'}:
         FOCUS[key]['054-WI198'] = [r'^\d+\.', r'^Appendix']
 def headings(page):
@@ -57,17 +57,6 @@ class ProcedureIndex:
         self.sections=[]
         for source in sources:
             if source.kind!='procedure':continue
-            if source.document_id == 'D00788856' and source.name.lower().endswith('.docx'):
-                groups={}
-                for chunk in source.chunks:
-                    row=re.match(r'^(Body, table \d+, row \d+), cell \d+', chunk.locator)
-                    key=row[1] if row else 'Overview and processing considerations'
-                    groups.setdefault(key, []).append(chunk)
-                for key, chunks in groups.items():
-                    title=chunks[0].text.splitlines()[0][:120] if key != 'Overview and processing considerations' else key
-                    self.sections.append(Section(f'policy-{len(self.sections)+1:03d}', source.id,
-                                                 'procedure', title, chunks))
-                continue
             active=[]
             for page in page_groups(source):
                 titles=headings(page)

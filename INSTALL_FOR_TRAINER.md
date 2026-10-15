@@ -39,7 +39,7 @@ Connection setup performs text and JSON probes containing no complaint documents
 
 ## Procedures and output
 
-The six bundled procedure revisions load automatically: 027-P043 K, 027-WI185 R, 027-WI186 N, 027-WI188 M, 054-P044 L and 054-WI198 P. Existing uploaded copies take precedence. D00788856 and D00788854 are excluded from new reviews.
+The six bundled procedure revisions load automatically: 027-P043 K, 027-WI185 R, 027-WI186 N, 027-WI188 M, 054-P044 L and 054-WI198 P. Existing uploaded copies take precedence. D00788854 are excluded from new reviews.
 
 To replace a procedure, open **Documents & settings**, select the document ID, enter its approved revision and upload PDF, Word or text. The replacement is used in later reviews and survives updates. It does not alter completed review evidence.
 

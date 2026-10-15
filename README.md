@@ -12,7 +12,7 @@ New reviews follow the [46 review areas](REVIEW_AREAS.md) in the supplied screen
 
 The extension supports `https://crm.medtronic.com`, `https://crmstage.medtronic.com` and `https://cpic1cs.corp.medtronic.com:8008`, including their SAP start paths. The two test GCH sites continue to use the existing MDT-GPT Production endpoint, model and authentication. Reload the extension and restart Chrome after updating the helper; the extension identity is unchanged.
 
-The eleven defaults include the original six plus **D00780668 F** (Brazil), **054-WI204 M** (China), **D00780698 E** (Japan), **D00780699 D** (South Korea), and **D00788856 G** (US MDR 3500A completion guidance). Original files and checked extraction indexes are bundled, including the supplied DOCX. MDR table-row extraction retains the field label, guidance and nested cells together. PDF diagrams, rotated text and form marks still need visual review where relevant.
+The eleven defaults include the original six plus **D00780668 F** (Brazil), **054-WI204 M** (China), **D00780698 E** (Japan), **D00780699 D** (South Korea). Original files and checked extraction indexes are bundled, including the supplied DOCX. MDR table-row extraction retains the field label, guidance and nested cells together. PDF diagrams, rotated text and form marks still need visual review where relevant.
 
 In **Documents & settings → Local work instructions (optional)**, enter a local document ID and revision, choose a PDF, DOCX or text file, and confirm approval for training context. Up to 20 local instructions can be stored, 20 MB per file. Uploading the same local ID replaces its active revision; Remove excludes it from future reviews. Local instructions persist across restarts and updates, are available to evidence retrieval, and may be cited as additional context. They cannot replace missing default procedures, override controlled rules or enable AI review of manual-only areas. Relevant text is sent to MDT-GPT with the review. Existing reports and source history are retained.
 
@@ -90,7 +90,7 @@ python render_report.py --review path/to/review.json --evidence path/to/evidence
 
 ## Included procedures
 
-The six supplied defaults load automatically: 027-P043 K, 027-WI185 R, 027-WI186 N, 027-WI188 M, 054-P044 L and 054-WI198 P. Original PDFs and checked, page-located extraction files are bundled. These are baseline copies, not a live controlled-document subscription. **Documents & settings** allows approved replacements, which survive upgrades. D00788856 and D00788854 remain excluded from new reviews. Historical source snapshots are preserved.
+The six supplied defaults load automatically: 027-P043 K, 027-WI185 R, 027-WI186 N, 027-WI188 M, 054-P044 L and 054-WI198 P. Original PDFs and checked, page-located extraction files are bundled. These are baseline copies, not a live controlled-document subscription. **Documents & settings** allows approved replacements, which survive upgrades. D00788854 remain excluded from new reviews. Historical source snapshots are preserved.
 
 ## Package and tests
 

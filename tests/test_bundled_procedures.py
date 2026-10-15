@@ -132,7 +132,7 @@ class ReviewScopeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             repo=Repository(Path(d))
             try:
-                for docid in ['027-P043','D00788856','D00788854']:
+                for docid in ['027-P043','D00788854']:
                     source,warnings=source_from_bytes(docid+'.txt',(docid+' Synthetic test only; this text does not represent any controlled procedure requirements.').encode(),docid,'procedure',docid,revision='TEST',approved=True)
                     repo.put(source,warnings)
                 self.assertEqual([s.document_id for s,_ in repo.active_procedures()],['027-P043'])
