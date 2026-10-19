@@ -54,7 +54,7 @@ class Application:
         self.lock = threading.RLock()
         self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='gch-review')
         self.jobs, self.captures = {}, {}
-        self.connection = {'token': os.environ.get('MDT_GPT_API_TOKEN', ''),
+        self.connection = {'token': '',
             'model': DEFAULT_MODEL, 'auth_style': DEFAULT_AUTH, 'tested': False,
             'structured_mode': 'auto', 'environment':ENVIRONMENT}
         self.reset_saved_token = False
@@ -79,6 +79,7 @@ class Application:
                 self.connection['token'] = ''
         else:
             self.reset_saved_token = True
+            self.connection['token'] = os.environ.get('MDT_GPT_API_TOKEN', '').strip()
     def persist_preferences(self):
         self.settings_file.write_text(json.dumps({'settings_version': SETTINGS_VERSION, 'model': self.connection['model'],
             'auth_style': self.connection['auth_style'], 'environment':ENVIRONMENT, 'provider':PROVIDER,

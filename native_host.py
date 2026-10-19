@@ -50,7 +50,6 @@ class NativeService:
         self.vault = token_store or TokenStore(directory)
         if self.app.reset_saved_token:
             self.vault.clear()
-            self.app.connection['token'] = ''
             self.app.reset_saved_token = False
             self.app.persist_preferences()
         if not self.app.connection['token']:
