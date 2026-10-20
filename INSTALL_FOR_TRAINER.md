@@ -1,11 +1,24 @@
-# Trainer / IT installation — version 0.7.3
+# Trainer / IT installation — version 0.8.0
+
+## Portable Windows release (current installation method)
+
+Use **GCH-Check-My-Work-Windows-x64.zip**, built by the **Build Windows package**
+workflow. It includes Python and all application dependencies; users do not need
+Python installed. Extract the complete ZIP to a permanent folder, run
+**Install-Windows.cmd**, and load/reload its `extension` folder in Chrome.
+**Start-Windows.cmd** performs the same registration. See
+[Windows release instructions](WINDOWS_RELEASE.md) for builds, upgrades, and validation.
+Do not distribute a copied `.venv` or GitHub's source archive to trainees.
+
+The connection and training checks below still apply. Developers running from
+source need Python; the portable Windows release installs offline without pip.
 
 ## Update the existing installation
 
 1. Close Chrome completely so the old background helper exits.
 2. Extract this package and replace the files inside the **same existing GCH_Check_My_Work_App installation folder**, including `extension` and `procedures`.
 3. Reopen Chrome. At `chrome://extensions`, reload **GCH Check my work**, then refresh the GCH page.
-4. Run **Install-Windows.cmd** again to install the added email/spreadsheet/text parsers. In **Documents & settings**, confirm **Background helper version: 0.7.3**. Connection settings must show Production, `gpt-5.6-terra` and `Authorization: Bearer`.
+4. Run **Install-Windows.cmd** again to refresh registration of the bundled helper. Its email/spreadsheet/text parsers are included in the release. In **Documents & settings**, confirm the helper version matches the release. Connection settings must show Production, `gpt-5.6-terra` and `Authorization: Bearer`.
 5. Click **Check my work** to generate a new review. Enter the working **Production API token** only if prompted. Remember protects it for the Windows account.
 
 The extension ID and native registration remain valid when the installation folder is unchanged. If you move the folder, run Install-Windows.cmd again and load the extension from its new location. Remove any separate older extension copy. Keep the manifest key and native_config.json identity together.
@@ -15,7 +28,7 @@ The migration resets previous provider/model/auth/environment settings and clear
 ## First installation
 
 1. Extract the complete package into a permanent folder.
-2. Run **Install-Windows.cmd** under the Windows account that will use the tool. Python 3.10+ and the approved Python package source are required. The script installs dependencies and registers a per-user Chrome native messaging helper.
+2. Run **Install-Windows.cmd** from the complete portable release under the Windows account that will use the tool. Python is bundled; no package download is required. The script registers a per-user Chrome native messaging helper.
 3. Load the `extension` folder using your approved Chrome deployment process. For a permitted pilot, use `chrome://extensions` → Developer mode → Load unpacked. For trainee rollout, use managed distribution.
 4. Open GCH and refresh it. The **Check my work** button appears at the top right.
 5. Confirm the Downloads location under **Documents & settings**, then enter a Production token in the GCH panel.

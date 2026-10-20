@@ -1,0 +1,67 @@
+name: Build Windows package
+on:
+  workflow_dispatch:
+  push:
+    branches: ['main', 'portable-windows']
+    tags: ['v*']
+  pull_request:
+    paths:
+      - '**.py'
+      - '**.cmd'
+      - 'requirements.txt'
+      - 'procedures/**'
+      - 'examples/**'
+      - 'web/**'
+      - 'extension/**'
+      - 'native_config.json'
+      - '.github/workflows/windows-release.yml'
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: 'x64'
+      - name: Install build dependencies
+        run: python -m pip install -r requirements.txt PyInstaller==6.16.0
+      - name: Test installation registration
+        run: python -m unittest discover -s tests -v
+      - name: Build and smoke test release
+        run: python build_windows.py
+      - name: Test moved package without Python on PATH
+        shell: pwsh
+        run: |
+          $destination = Join-Path $env:RUNNER_TEMP 'GCH portable & moved (test) % folder'
+          Expand-Archive 'dist/GCH-Check-My-Work-Windows-x64.zip' $destination
+          $package = Join-Path $destination 'GCH-Check-My-Work-Windows-x64'
+          $helper = Join-Path $package 'GCH-Helper.exe'
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $env:PYTHONHOME = 'C:\nonexistent-python'
+          $env:PYTHONPATH = 'C:\nonexistent-python'
+          if (Get-Command python, py -ErrorAction SilentlyContinue) { throw 'Python is still on PATH' }
+          & $helper --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged smoke test failed' }
+          & $helper --install
+          if ($LASTEXITCODE -ne 0) { throw 'Native host installation failed' }
+          $manifestPath = (Get-Item 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.gch.check_my_work').GetValue('')
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          if ($manifest.path -ne $helper) { throw 'Manifest does not point to the moved executable' }
+          if ($manifest.allowed_origins[0] -ne 'chrome-extension://nlpgdigncphphoodneedoalppaeedapa/') { throw 'Extension identity changed' }
+          # Exercise the same command as both CMD launchers without their interactive pause.
+          $install = Join-Path $package 'Install-Windows.cmd'
+          cmd /d /c "`"$install`" <NUL"
+          if ($LASTEXITCODE -ne 0) { throw 'CMD installation failed' }
+          $start = Join-Path $package 'Start-Windows.cmd'
+          cmd /d /c "`"$start`" <NUL"
+          if ($LASTEXITCODE -ne 0) { throw 'CMD startup failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GCH-Check-My-Work-Windows-x64
+          path: |
+            dist/GCH-Check-My-Work-Windows-x64.zip
+            dist/GCH-Check-My-Work-Windows-x64.zip.sha256
+          if-no-files-found: error

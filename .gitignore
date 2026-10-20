@@ -5,3 +5,5 @@ native-launch.cmd
 .env
 .env.*
 !.env.example
+/build/
+/dist/
