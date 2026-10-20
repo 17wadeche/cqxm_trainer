@@ -1,2 +1,4 @@
 @echo off
-call "%~dp0Install-Windows.cmd"
+cd /d "%~dp0"
+if errorlevel 1 exit /b 1
+.\Install-Windows.cmd
