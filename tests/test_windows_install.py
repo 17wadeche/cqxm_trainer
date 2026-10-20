@@ -9,7 +9,7 @@ class WindowsInstallTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)/'GCH & relocated (test) % folder'
+        self.root = Path(self.temp.name).resolve()/'GCH & relocated (test) % folder'
         self.root.mkdir()
         self.extension = 'nlpgdigncphphoodneedoalppaeedapa'
         (self.root/'native_config.json').write_text(json.dumps({'extension_id': self.extension}))
