@@ -39,7 +39,9 @@ jobs:
           Expand-Archive 'dist/GCH-Check-My-Work-Windows-x64.zip' $destination
           $package = Join-Path $destination 'GCH-Check-My-Work-Windows-x64'
           $helper = Join-Path $package 'GCH-Helper.exe'
-          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $emptyPath = Join-Path $env:RUNNER_TEMP ('gch-empty-path-' + [Guid]::NewGuid().ToString())
+          New-Item -ItemType Directory -Path $emptyPath | Out-Null
+          $env:PATH = $emptyPath
           $env:PYTHONHOME = 'C:\nonexistent-python'
           $env:PYTHONPATH = 'C:\nonexistent-python'
           if (Get-Command python, py -ErrorAction SilentlyContinue) { throw 'Python is still on PATH' }
@@ -53,10 +55,10 @@ jobs:
           if ($manifest.allowed_origins[0] -ne 'chrome-extension://nlpgdigncphphoodneedoalppaeedapa/') { throw 'Extension identity changed' }
           # Exercise the same command as both CMD launchers without their interactive pause.
           $install = Join-Path $package 'Install-Windows.cmd'
-          cmd /d /c "`"$install`" <NUL"
+          & "$env:SystemRoot\System32\cmd.exe" /d /c "`"$install`" <NUL"
           if ($LASTEXITCODE -ne 0) { throw 'CMD installation failed' }
           $start = Join-Path $package 'Start-Windows.cmd'
-          cmd /d /c "`"$start`" <NUL"
+          & "$env:SystemRoot\System32\cmd.exe" /d /c "`"$start`" <NUL"
           if ($LASTEXITCODE -ne 0) { throw 'CMD startup failed' }
       - uses: actions/upload-artifact@v4
         with:
