@@ -7,3 +7,4 @@ native-launch.cmd
 !.env.example
 /build/
 /dist/
+.build-venv
