@@ -14,6 +14,8 @@ from procedure_sections import ProcedureIndex, coverage
 from evidence_quality import validate_availability
 from context_budget import estimate_tokens
 from render_report import render
+from review_rules import (NOT_REPORTABLE_EXCLUSIONS, FER_CHECK_IDS,
+                          not_reportable_evidence, not_reportable_fer, trainer_finding)
 TOOLS = [
     {"name":"read_procedure_section","description":"Read a governing procedure section or appendix from the supplied outline, with its complete table, conditions and continuation pages. Start at offset 0 and follow next_offset until null.",
      "input_schema":{"type":"object","properties":{"source_id":{"type":"string"},"section_id":{"type":"string"},"offset":{"type":"integer","minimum":0}},"required":["source_id","section_id","offset"],"additionalProperties":False}},
@@ -320,8 +322,12 @@ class ReviewEngine:
         for source, limits in selected:
             sources.append(source)
             warnings.extend(limits)
-        expected = [c[0] for group in GROUPS for c in group['checks']]
-        warnings.append("Training feedback only. Source excerpts are verified for text presence; trainer judgment is required for correctness and applicability.")
+        not_reportable = not_reportable_evidence(sources)
+        excluded = NOT_REPORTABLE_EXCLUSIONS if not_reportable else set()
+        expected = [c[0] for group in GROUPS for c in group['checks'] if c[0] not in excluded]
+        if not_reportable:
+            warnings.append('The saved event is Not Reportable. MDR fields and FDM/FDR/FDC/IMG are excluded; all four FER rows are automatically marked Done Properly by the configured training rule.')
+            warnings.append("Training feedback only. Source excerpts are verified for text presence; trainer judgment is required for correctness and applicability.")
         evidence = EvidenceManifest(mode='review', review_id=job_id, record_id=record_id,
             record_stage=stage, generated_at=datetime.now(timezone.utc).isoformat(),
             prompt_version=VERSION, model_version=connection['model'], template_version=VERSION,
@@ -335,11 +341,13 @@ class ReviewEngine:
             progress(f"Reviewing {group['name'].lower()}", 15 + int(idx*70/len(GROUPS)))
             eligible = []
             for check in group['checks']:
+                if check[0] in excluded:
+                    continue
+                if not_reportable and check[0] in FER_CHECK_IDS:
+                    findings.append(not_reportable_fer(check[0], check[1], not_reportable))
+                    continue
                 if check[0] in MANUAL_CHECK_IDS:
-                    findings.append(Finding(check_id=check[0], record_element=check[1],
-                        what_was_done="Manual Review Needed", record_evidence=[], procedure_references=[],
-                        assessment="manual_review_needed", feedback="Manual Review Needed",
-                        priority="none", study_action=""))
+                    findings.append(trainer_finding(check))
                     continue
                 missing = [d for d in check[2] if d not in by_doc]
                 if check[3] and not has_mdr:
@@ -396,7 +404,7 @@ class ReviewEngine:
             extra_limits.append('Retrieval used a locally validated JSON plan because the gateway rejected native tool parameters. Only the same approved read-only tools were available.')
         manual_count = sum(f.assessment == 'manual_review_needed' for f in findings)
         automatic_count = len(findings) - manual_count
-        review = Review(overall_summary=f"{assessed} of {automatic_count} evidence-based review areas have an assessment from the available inputs. {manual_count} areas require manual review. Any unassessed evidence-based areas need additional evidence or applicable procedures. Discuss the findings and study priorities with the trainer; this is not an overall compliance determination.",
+        review = Review(overall_summary=f"{assessed} of {automatic_count} automatic review areas have an assessment from the available inputs. {manual_count} areas require Trainer Review. Any unassessed evidence-based areas need additional evidence or applicable procedures. Discuss the findings with the trainer; this is not an overall compliance determination.",
                         limitations=list(dict.fromkeys(extra_limits)), findings=findings)
         validate_traceability(review, evidence)
         progress("Creating the Word report", 92)

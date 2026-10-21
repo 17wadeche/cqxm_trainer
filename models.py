@@ -92,18 +92,25 @@ def validate_traceability(review: Review, evidence: EvidenceManifest) -> None:
         if chunk is None or _norm(ref.quote) not in _norm(chunk.text):
             raise ValueError(f"Unverified excerpt: {ref.source_id}/{ref.chunk_id}")
     from config import MANUAL_CHECK_IDS
+    from review_rules import FER_CHECK_IDS, not_reportable_evidence, not_reportable_fer
+    not_reportable = not_reportable_evidence(evidence.sources)
     for finding in review.findings:
         if finding.check_id in MANUAL_CHECK_IDS or finding.assessment == 'manual_review_needed':
             if (finding.check_id not in MANUAL_CHECK_IDS or finding.assessment != 'manual_review_needed'
-                or finding.what_was_done != 'Manual Review Needed' or finding.feedback != 'Manual Review Needed'
-                or finding.record_evidence or finding.procedure_references
+                or (finding.what_was_done, finding.feedback) not in {
+                    ('Trainer Review', 'Trainer Review'), ('Manual Review Needed', 'Manual Review Needed')}                or finding.record_evidence or finding.procedure_references
                 or finding.priority != 'none' or finding.study_action):
-                raise ValueError('Manual review rows must remain fixed and unassessed')
+                raise ValueError('Trainer Review rows must remain fixed and unassessed')
             continue
         for ref in finding.record_evidence:
             check_ref(ref, "record")
         for ref in finding.procedure_references:
             check_ref(ref, "procedure")
+        if not_reportable and finding.check_id in FER_CHECK_IDS:
+            expected_fer = not_reportable_fer(finding.check_id, finding.record_element, not_reportable)
+            if finding != expected_fer:
+                raise ValueError('Not Reportable FER rows must follow the automatic training rule')
+            continue
         if finding.assessment != "not_assessable":
             if not finding.record_evidence or not finding.procedure_references or all(sources[r.source_id].document_id.startswith('LOCAL-') for r in finding.procedure_references):
                 raise ValueError(f"{finding.check_id}: assessment requires record and rule evidence")

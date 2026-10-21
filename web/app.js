@@ -6,7 +6,7 @@ if (token) sessionStorage.setItem('gch-session', token);
 const initialJob = fragment.get('job');
 history.replaceState(null, '', location.pathname);
 const state = { status: null, job: null, evidence: null, timer: null, finished: null };
-const labels = {manual_review_needed:'Manual Review Needed', done_properly:'Done properly', needs_trainer_review:'Trainer review', potential_gap:'Potential gap', not_assessable:'Not assessable', not_applicable:'Not applicable'};
+const labels = {manual_review_needed:'Trainer Review', done_properly:'Done properly', needs_trainer_review:'Trainer Review', potential_gap:'Potential gap', not_assessable:'Not assessable', not_applicable:'Not applicable'};
 function node(tag, text, className) {
   const item = document.createElement(tag);
   if (text !== undefined) item.textContent = text;
@@ -155,7 +155,7 @@ function renderResult() {
   $('overall-summary').textContent=review.overall_summary;
   $('demo-banner').classList.toggle('hidden',!result.demo);
   $('counts').replaceChildren();
-  const counts=[['Done properly',review.findings.filter(f=>f.assessment==='done_properly').length],['Discuss with trainer',review.findings.filter(f=>['needs_trainer_review','potential_gap'].includes(f.assessment)).length],['Needs more evidence',review.findings.filter(f=>f.assessment==='not_assessable').length]];
+  const counts=[['Done properly',review.findings.filter(f=>f.assessment==='done_properly').length],['Discuss with trainer',review.findings.filter(f=>['needs_trainer_review','manual_review_needed','potential_gap'].includes(f.assessment)).length],['Needs more evidence',review.findings.filter(f=>f.assessment==='not_assessable').length]];
   for(const [label,count]of counts){const item=node('div',undefined,'count');item.append(node('strong',count),node('span',label));$('counts').append(item);}
   const limits=[...new Set([...result.limitations,...review.limitations])];
   $('limit-count').textContent='('+limits.length+')';$('limitations-list').replaceChildren(...limits.map(t=>node('li',t)));
@@ -164,12 +164,12 @@ function renderResult() {
 function renderFindings() {
   if(!state.job?.result)return;
   const items=state.job.result.review.findings,filter=$('filter').value;
-  const shown=items.filter(f=>filter==='all'||f.assessment===filter);
+  const shown=items.filter(f=>filter==='all'||f.assessment===filter||(filter==='needs_trainer_review'&&f.assessment==='manual_review_needed'));
   $('findings-count').textContent=shown.length+' of '+items.length+' findings';$('findings').replaceChildren();
   for(const finding of shown){
     const card=node('article',undefined,'finding'),head=node('div',undefined,'finding-head');
     head.append(node('h4',(items.indexOf(finding)+1)+'. '+finding.record_element),node('span',labels[finding.assessment],'assessment '+finding.assessment));
-    if(finding.assessment==='manual_review_needed')card.append(head,node('p','Manual Review Needed','feedback'));
+    if(finding.assessment==='manual_review_needed')card.append(head,node('p','Trainer Review','feedback'));
     else card.append(head,node('p',finding.what_was_done),node('p',finding.feedback,'feedback'));
     if(finding.study_action)card.append(node('div',finding.priority.toUpperCase()+' STUDY PRIORITY · '+finding.study_action,'study-action'));
     const refs=[...finding.record_evidence,...finding.procedure_references];
