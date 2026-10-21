@@ -3,7 +3,7 @@ const GCH_ORIGINS=['https://crm.medtronic.com','https://crmstage.medtronic.com',
 const GCH_PATTERNS=GCH_ORIGINS.map(origin=>new URL(origin).protocol+'//'+new URL(origin).hostname+'/*');
 function isGCH(value){try{return GCH_ORIGINS.includes(new URL(value).origin);}catch{return false;}}
 const HOST='com.gch.check_my_work';const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-let nativePort=null, sequence=0, startBusy=false, downloadQueue=Promise.resolve();
+let nativePort=null, sequence=0, startBusy=false, downloadStartBusy=false, downloadQueue=Promise.resolve();
 const pending=new Map(), polling=new Set();
 function native(method,data={}) {
   if(!nativePort) {
@@ -40,6 +40,22 @@ async function update(tabId,values){
   return next;
 }
 async function capture(){return(await chrome.storage.session.get('capture')).capture||null;}
+async function downloadCapturedFile(active,url){
+  if(!isGCH(url))throw new Error('The file URL is outside GCH.');
+  if(downloadStartBusy)return;
+  downloadStartBusy=true;
+  try{
+    const current=await capture();
+    if(current?.captureId!==active.captureId||current.role!==active.role||current.currentAttachment?.started!==active.currentAttachment?.started||current.currentAttachment?.done||current.processing||current.downloadId!==null||current.requestedDownload)return;
+    current.requestedDownload=true;await chrome.storage.session.set({capture:current});
+    const id=await chrome.downloads.download({url,saveAs:false,conflictAction:'uniquify'});
+    const latest=await capture();
+    if(latest?.captureId!==active.captureId||latest.role!==active.role||latest.currentAttachment?.started!==active.currentAttachment?.started||latest.currentAttachment?.done)return;
+    if(latest.downloadId!==null&&latest.downloadId!==id)throw new Error('More than one file downloaded for the selected document.');
+    latest.downloadId=id;await chrome.storage.session.set({capture:latest});
+    const items=await chrome.downloads.search({id});if(items[0])enqueue(items[0]);
+  }finally{downloadStartBusy=false;}
+}
 async function finishCapture(){
   const active=await capture();
   if(active)await native('capture_cancel',{capture_id:active.captureId}).catch(()=>{});
@@ -78,9 +94,9 @@ async function retryDownload(){
       if((await capture())?.captureId!==active.captureId)return;
       active.attachmentDownloadIds=[...(active.attachmentDownloadIds||[]),retry.id];
     }
-    active.downloadId=null;active.requestedDownload=true;
+    active.downloadId=null;active.requestedDownload=false;
     await chrome.storage.session.set({capture:active});
-    await chrome.downloads.download({url:retry.url,saveAs:false,conflictAction:'uniquify'});
+    await downloadCapturedFile(active,retry.url);
   }catch{
     const current=await capture();
     if(current?.captureId===active.captureId)await scheduleDownloadRetry(current,{id:current.downloadId,url:retry.url});
@@ -198,7 +214,7 @@ async function collectAttachments(active){
       if(!row.downloadable){limits.push('Incoming attachment '+row.name.slice(0,180)+' has no unique download link.');continue;}
       const current=await capture();if(current?.captureId!==active.captureId)return false;
       await chrome.storage.session.set({capture:{...current,role:'attachment',downloadId:null,requestedDownload:false,processing:false,
-        downloadRetries:0,downloadRetry:null,currentAttachment:{name:row.name.slice(0,240),started:Date.now(),done:false,error:null}}});
+        downloadRetries:0,downloadRetry:null,currentAttachment:{name:row.name.slice(0,240),type:row.type,started:Date.now(),done:false,error:null}}});
       await update(active.tabId,{message:'Reading incoming file '+seen.size+'…'});
       let result=null;
       for(let attempt=0;attempt<=3&&!result;attempt++){
@@ -216,6 +232,7 @@ async function collectAttachments(active){
           if(!await attachmentCommand(active,frame,'download',row.key))return false;
         }
         for(let i=0;i<1200;i++){
+          await collectPdfAttachment();
           await collectHtmlAttachment();
           const latest=await capture();if(latest?.captureId!==active.captureId)return false;
           if(latest.currentAttachment?.done){result=latest.currentAttachment;break;}
@@ -239,6 +256,27 @@ async function collectAttachments(active){
   await chrome.storage.session.set({capture:{...current,role:'report',currentAttachment:null,downloadId:null,requestedDownload:false,processing:false,downloadRetries:0,downloadRetry:null,attachmentLimits:limits,reportStarted:Date.now()}});
   return true;
 }
+function isPdfAttachment(item){return /\.pdf$/i.test(item.name)||/^(?:application\/pdf\b|pdf\b)/i.test(item.type||'');}
+async function collectPdfAttachment(){
+  const active=await capture(),item=active?.currentAttachment;
+  if(active?.role!=='attachment'||!item||!isPdfAttachment(item)||item.done||active.processing||active.downloadId!==null||active.requestedDownload||active.downloadRetry)return;
+  const candidates=[];
+  for(const tabId of await reportTabs(active)){
+    if(tabId===active.tabId)continue;
+    const nav=await navigationInfo(tabId);if(nav.at<item.started)continue;
+    const frames=await chrome.webNavigation.getAllFrames({tabId}).catch(()=>[]);
+    for(const frame of frames||[]){
+      if(!isGCH(frame.url)||!new URL(frame.url).pathname.toLowerCase().startsWith('/sap/bc/contentserver/'))continue;
+      candidates.push(frame.url);
+    }
+  }
+  const urls=[...new Set(candidates)];
+  if(urls.length!==1)return; // Never guess between multiple document viewers.
+  const latest=await capture();
+  if(latest?.captureId!==active.captureId||latest.currentAttachment?.started!==item.started||latest.requestedDownload||latest.downloadRetry)return;
+  try{await downloadCapturedFile(latest,urls[0]);}
+  catch{await scheduleDownloadRetry(latest,{url:urls[0]});}
+}
 function htmlAttachmentBody(expectedUrl){
   if(location.href!==expectedUrl||document.readyState!=='complete'||document.contentType!=='text/html')return null;
   const text=document.body?.innerText||'';
@@ -249,10 +287,11 @@ function htmlAttachmentBody(expectedUrl){
 async function collectHtmlAttachment(){
   const active=await capture(),item=active?.currentAttachment;
   if(active?.role!=='attachment'||!item?.viewer||item.done||active.processing||active.downloadId!==null)return;
+  if(isPdfAttachment(item))return;
   const viewer=item.viewer;
   let results;
   try{results=await chrome.scripting.executeScript({target:{tabId:viewer.tabId,frameIds:[viewer.frameId]},func:htmlAttachmentBody,args:[viewer.url]});}
-  catch{return;} // Retry a viewer that is still navigating.
+  catch{return;}
   const body=results[0]?.result;if(!body)return;
   const latest=await capture();
   if(latest?.captureId!==active.captureId||latest.currentAttachment?.started!==item.started||latest.processing||latest.downloadId!==null||latest.currentAttachment.done)return;
@@ -321,7 +360,7 @@ async function consider(item){
     if(!expected||expected.done||Date.parse(item.startTime)<expected.started-1000)return;
     const filename=(item.filename||'').split(/[\\/]/).pop().replace(/ \(\d+\)(?=\.[^.]+$)/,'').toLowerCase();
     const name=expected.name.toLowerCase();
-    if(/\.[a-z0-9]{2,5}$/i.test(name)&&filename!==name)return;
+    if(active.downloadId!==item.id&&/\.[a-z0-9]{2,5}$/i.test(name)&&filename!==name)return;
     if(active.downloadId!==null&&active.downloadId!==item.id)throw new Error('More than one incoming file downloaded for the selected attachment.');
     active.downloadId=item.id;await chrome.storage.session.set({capture:active});
     if(item.state==='interrupted'){await scheduleDownloadRetry(active,item);return;}
@@ -386,9 +425,9 @@ chrome.webRequest.onHeadersReceived.addListener(details=>{
       }
       latest.currentAttachment.viewer={tabId:details.tabId,frameId:details.frameId||0,url:details.url};
       await chrome.storage.session.set({capture:latest});return;
-    }    latest.requestedDownload=true;await chrome.storage.session.set({capture:latest});
+    }
     try{
-      await chrome.downloads.download({url:details.url,saveAs:false,conflictAction:'uniquify'});
+      await downloadCapturedFile(latest,details.url);
       if(details.tabId!==active.tabId&&tab?.active){
         try{
           await chrome.tabs.update(active.tabId,{active:true});
