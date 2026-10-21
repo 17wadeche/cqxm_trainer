@@ -7,19 +7,19 @@ from docx.shared import Pt, RGBColor
 from models import Review, EvidenceManifest, validate_traceability
 from word_styles import document, table, body
 LABELS = {
-    "manual_review_needed": "Manual Review Needed",
-    "done_properly": "Done properly", "needs_trainer_review": "Trainer review",
+    "manual_review_needed": "Trainer Review",
+    "done_properly": "Done properly", "needs_trainer_review": "Trainer Review",
     "potential_gap": "Potential gap", "not_assessable": "Not assessable",
     "not_applicable": "Not applicable",
 }
 TABLE_LIMITS = {'record_element':120, 'what_was_done':500, 'feedback':600, 'study_action':400}
 FIELD_LABELS = {
-    "manual_review_needed": "Manual Review Needed",'record_element':'Record element', 'what_was_done':'What was done',
+    "manual_review_needed": "Trainer Review",'record_element':'Record element', 'what_was_done':'What was done',
     'feedback':'Feedback for new employee', 'study_action':'Study action'}
 def fits_cell(text, limit):
     return len(text)<=limit and text.count('\n')<=6
 LEGACY_SHORT_LABELS = {
-    "manual_review_needed": "Manual Review Needed",'intake':'Intake', 'narrative':'Reported event', 'identifiers':'Product identifiers',
+    "manual_review_needed": "Trainer Review",'intake':'Intake', 'narrative':'Reported event', 'identifiers':'Product identifiers',
     'coding':'Event coding', 'harm':'Patient impact', 'gfe':'Good faith effort',
     'investigation':'Investigation', 'cause':'Cause and conclusion', 'reportability':'US reportability',
     'timing':'Reporting dates', 'consultation':'Medical consultation', 'consistency':'Event and medical report', 'closure':'Closure'}
@@ -48,11 +48,11 @@ def write_concise_report(*, record_id, stage, findings, procedures, scope, outpu
     if note:body(doc,note)
     if procedures:body(doc,'Procedures: '+procedures)
     body(doc,scope)
-    counts=Counter(f['assessment'] for f in findings)
+    counts=Counter('needs_trainer_review' if f['assessment']=='manual_review_needed' else f['assessment'] for f in findings)
     body(doc,' | '.join(f'{counts[key]} {label}' for key,label in [
         ('done_properly','done properly'),('needs_trainer_review','trainer review'),
         ('potential_gap','potential gaps'),('not_assessable','not assessable'),
-        ('not_applicable','not applicable'),('manual_review_needed','manual review needed')] if counts[key]))
+        ('not_applicable','not applicable')] if counts[key]))
     doc.add_heading('Training review',1)
     rows=[[i,f['area'],'' if f['assessment']=='done_properly' else f['observation'],f['references'],
            '✓ Done properly' if f['assessment']=='done_properly' else LABELS[f['assessment']],
@@ -62,7 +62,7 @@ def write_concise_report(*, record_id, stage, findings, procedures, scope, outpu
           rows,[.25,.85,1.35,1.05,.85,2.80],font_size=10,center_cols=(0,),allow_split=True)
     for i,f in enumerate(findings,1):
         if f['assessment']=='manual_review_needed':
-            review_table.cell(i,2).merge(review_table.cell(i,5)).text='Manual Review Needed'
+            review_table.cell(i,2).merge(review_table.cell(i,5)).text='Trainer Review'
         if f['assessment']=='done_properly':
             cell=review_table.cell(i,4)
             cell.text=''
@@ -72,14 +72,6 @@ def write_concise_report(*, record_id, stage, findings, procedures, scope, outpu
             check.font.color.rgb=RGBColor(0,128,0)
             check.font.size=Pt(10)
             p.add_run(' Done properly').font.size=Pt(10)
-    priorities=sorted([(i,f) for i,f in enumerate(findings,1) if f['assessment']!='done_properly' and f['priority']!='none' and f['action']],
-                      key=lambda pair:{'high':0,'medium':1,'low':2}[pair[1]['priority']])[:5]
-    if priorities:
-        doc.add_heading('Start here',1)
-        body(doc,'Start with these actions. Other points for discussion are in the review table.')
-        table(doc,['Priority','Review area','Action'],
-              [[f['priority'].title(),f"Item {i} · {f['area']}",f['action']] for i,f in priorities],
-              [.65,1.50,5.05],font_size=10,allow_split=True)
     if run_note:
         p=body(doc,run_note)
         for run in p.runs:run.font.size=Pt(8)
@@ -99,7 +91,10 @@ def render(review: Review, evidence: EvidenceManifest, output: Path, *, detailed
     attachment_limits=[v for v in evidence.limitations if 'attachment' in v.lower() and not v.startswith('No readable incoming')]
     if attachment_limits:
         scope+=' Incoming information is incomplete: '+' '.join(dict.fromkeys(attachment_limits))
-    if not any(s.document_id=='MDR' and s.kind=='record' for s in evidence.sources):
+    from review_rules import not_reportable_evidence
+    if not_reportable_evidence(evidence.sources):
+        scope+=' The event is Not Reportable. MDR fields and FDM/FDR/FDC/IMG are excluded; FER rows are automatically marked Done properly.'
+    elif not any(s.document_id=='MDR' and s.kind=='record' for s in evidence.sources):
         scope+=' A matching MDR was not supplied.'
     findings=[{'area':SHORT_LABELS.get(f.check_id,f.record_element),'observation':f.what_was_done,
                'references':compact_references(f,sources),'assessment':f.assessment,'feedback':f.feedback,
@@ -154,7 +149,7 @@ def render_detailed(review: Review, evidence: EvidenceManifest, output: Path) ->
           rows, [.25, 1.05, 1.35, 1.20, 1.00, 2.35], font_size=9.5, center_cols=(0,))
     for i, f in enumerate(review.findings, 1):
         if f.assessment == 'manual_review_needed':
-            review_table.cell(i,2).merge(review_table.cell(i,5)).text='Manual Review Needed'
+            review_table.cell(i,2).merge(review_table.cell(i,5)).text='Trainer Review'
     doc.add_heading("Study priorities", 1)
     priorities = sorted([(i,f) for i,f in enumerate(review.findings,1) if f.priority != "none"],
                         key=lambda pair: {"high": 0, "medium": 1, "low": 2}[pair[1].priority])
@@ -181,7 +176,7 @@ def render_detailed(review: Review, evidence: EvidenceManifest, output: Path) ->
         for ref in refs:
             body(doc, citation_label(ref))
             body(doc, "Excerpt: “" + ref.quote + "”")
-    doc.add_heading("Trainer review", 1)
+    doc.add_heading("Trainer Review", 1)
     body(doc, "Trainer name ____________________    Review date ____________________")
     body(doc, "Agreed findings and corrections ______________________________________")
     body(doc, "Follow up learning actions __________________________________________")
