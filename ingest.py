@@ -151,7 +151,7 @@ def source_from_bytes(name, data, source_id, kind, document_id, record_id=None,
         if document_id=='DER':
             compact=[]
             for c in chunks:
-                lines=[re.sub(r'[ \t]+',' ',line).strip() for line in c.text.splitlines()]
+                lines=[line.strip() for line in c.text.splitlines()]
                 text='\n'.join(line for line in lines if line and line not in {'Global Complaint Handling','Medtronic Confidential'})
                 if text:compact.append(c.model_copy(update={'text':text}))
             chunks=compact
