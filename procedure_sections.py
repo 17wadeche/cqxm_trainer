@@ -25,6 +25,11 @@ for key, base in {
     'investigation_summary':'investigation','customer_response':'gfe',
 }.items():
     FOCUS[key] = FOCUS[base]
+FOCUS['initial_reporter'] = {'027-WI185': EVENT_DETAILS + [r'^Appendix [A-Z].*Regional Privacy Laws']}
+FOCUS['complaint_status'] = {
+    '027-P043': [r'^\d+\.\s*Intake, Assessment, and Complaint Determination'] + FOCUS['closure']['027-P043'],
+    '027-WI185': [r'^\d+\.\s*Complaint Determination', r'^Appendix [A-Z].*Complaint Assessment'],
+}
 for key in ['notified_date', 'aware_date']:
     FOCUS[key] = {'027-WI185': EVENT_DETAILS,
                   '054-P044': [r'^Appendix [A-Z].*Aware Date vs']}
@@ -89,6 +94,9 @@ class ProcedureIndex:
         if check_ids & {'timing','reportability','consultation'}:terms+=['Aware Date','Serious Injury','Working Day']
         if 'aware_date' in check_ids:terms+=['Aware Date']
         if 'notified_date' in check_ids:terms+=['Notified Date','Notify Date']
+        if 'initial_reporter' in check_ids:terms+=['Initial Reporter','External Contact','Internal Contact']
+        if 'complaint_notified_date' in check_ids:terms+=['Complaint Handling Notified Date','Complaint Handling Notify Date']
+        if 'complaint_status' in check_ids:terms+=['Complaint']
         if check_ids & {'intake','investigation','cause'}:terms+=['Complaint','Reasonably Known']
         selected=[]
         docs={d for check in checks for d in check[2]}

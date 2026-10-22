@@ -54,6 +54,13 @@ FIELD_ROUTES = {
 for key, (base, patterns) in FIELD_ROUTES.items():
     ROUTES[key] = ROUTES[base]
     ANCHORS[key] = patterns
+ROUTES['complaint_status'] = ['product','event','investigation','tasks','analysis','reportability','regulatory']
+ANCHORS['complaint_status'] = [r'\bComplaint(?:\s+(?:Status|Determination|Decision))?\b',
+                              r'\b(?:PE|Parent Event|Event) Status\b']
+ANCHORS['initial_reporter'] += [r'\bUnknown\s+(?:Patient|Friend\s*/\s*Family(?:\s+member)?)\b',
+                               r'\b(?:Reporter|Contact) (?:Details|Name|Information)\b']
+ANCHORS['complaint_notified_date'] += [r'\bCH\s+(?:Notify|Notified|Notification)\s+Date\b']
+ANCHORS['product_return_status'] += [r'Product Returned to MDT', r'Intent to Return']
 for key, country in [('brazil_reporting','Brazil'), ('china_reporting','China'),
                      ('japan_reporting','Japan'), ('korea_reporting','Korea')]:
     ROUTES[key] = ['reportability','regulatory','mdr']
