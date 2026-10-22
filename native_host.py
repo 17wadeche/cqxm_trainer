@@ -9,13 +9,20 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 from app import Application, checked_text, file_payload
-from config import ROOT, PROCEDURES, DEFAULT_MODEL, DEFAULT_AUTH, ENVIRONMENT, VERSION, BUNDLED_PROCEDURES, data_directory
+from config import (ROOT, PROCEDURES, DEFAULT_MODEL, DEFAULT_AUTH, ENVIRONMENT, VERSION,
+                    BUNDLED_PROCEDURES, data_directory, LOCAL_REVIEW_CHECK_IDS, REVIEW_AREAS)
 from ingest import source_from_bytes
 from mdt import ProviderError, probe_connection
 from token_store import TokenStore
 MAX_IN = 30 * 1024 * 1024
 MAX_OUT = 900 * 1024
 HOST_NAME = 'com.gch.check_my_work'
+def review_scope(data):
+    selected = data.get('review_check_ids', [])
+    if (not isinstance(selected, list) or any(not isinstance(c, str) or c not in LOCAL_REVIEW_CHECK_IDS for c in selected)
+        or len(selected) != len(set(selected))):
+        raise ValueError('Choose supported local review topics; investigation areas remain Trainer Review.')
+    return selected
 def read_exact(stream, length):
     parts = bytearray()
     while len(parts) < length:
@@ -67,7 +74,9 @@ class NativeService:
                 'auth_style': self.app.connection['auth_style'],
                 'environment':ENVIRONMENT,
                 'downloads': str(self.app.downloads),
-                'expected_procedures': [{'id': d, 'name': n} for d, n in PROCEDURES]}
+                'expected_procedures': [{'id': d, 'name': n} for d, n in PROCEDURES],
+                'local_review_topics': [{'id': row[0], 'name': row[1]} for row in REVIEW_AREAS
+                                        if row[0] in LOCAL_REVIEW_CHECK_IDS]}
     def ready(self):
         state = self.status()
         if not state['token_present']:
@@ -149,6 +158,18 @@ class NativeService:
                 self.app.downloads = folder
                 self.app.persist_preferences()
             return self.status()
+        if method == 'local_review_scope':
+            source_id = checked_text(data.get('source_id'), 'the local instruction', 80)
+            selected = review_scope(data)
+            with self.app.repo.lock:
+                entry = next(((s, w) for s, w in self.app.repo.active_procedures()
+                              if s.id == source_id and s.document_id.startswith('LOCAL-')), None)
+                if entry is None:
+                    raise ValueError('Choose an active local instruction to update.')
+                source, warnings = entry
+                updated = source.model_copy(update={'id': str(uuid4()), 'review_check_ids': selected})
+                self.app.repo.put(updated, warnings)
+            return self.status()
         if method == 'remove_local_procedure':
             source_id = checked_text(data.get('source_id'), 'the local instruction', 80)
             if not any(s.id == source_id and s.document_id.startswith('LOCAL-')
@@ -157,6 +178,7 @@ class NativeService:
             self.app.repo.remove(source_id)
             return self.status()
         if method == 'local_procedure':
+            selected = review_scope(data)
             document_id = checked_text(data.get('document_id'), 'the local document ID', 34).upper()
             if not re.fullmatch(r'[A-Z0-9][A-Z0-9_-]{0,33}', document_id):
                 raise ValueError('Use letters, numbers, underscores or hyphens for the local document ID.')
@@ -168,6 +190,7 @@ class NativeService:
             name, payload = file_payload(data.get('file'))
             source, warnings = source_from_bytes(name, payload, str(uuid4()), 'procedure', 'LOCAL-'+document_id,
                                                  revision=revision, approved=True)
+            source.review_check_ids = selected
             normalized = re.sub(r'\W', '', '\n'.join(c.text for c in source.chunks)).upper()
             if re.sub(r'\W', '', document_id) not in normalized:
                 raise ValueError('The local document ID was not found in the file.')

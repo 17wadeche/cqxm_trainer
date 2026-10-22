@@ -83,6 +83,9 @@ class ProcedureIndex:
         by_id={s.id:s for s in sources}
         selected=[]
         for check in checks:
+            for section in self.sections:
+                if by_id[section.source_id].document_id in check[2] and by_id[section.source_id].document_id.startswith('LOCAL-'):
+                    if section not in selected:selected.append(section)
             for docid,patterns in FOCUS.get(check[0],{}).items():
                 for section in self.sections:
                     if by_id[section.source_id].document_id==docid and any(re.search(p,section.title,re.I) for p in patterns):

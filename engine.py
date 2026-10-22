@@ -15,7 +15,7 @@ from evidence_quality import validate_availability
 from context_budget import estimate_tokens
 from render_report import render
 from review_rules import (NOT_REPORTABLE_EXCLUSIONS, FER_CHECK_IDS,
-                          not_reportable_evidence, not_reportable_fer, trainer_finding)
+                          not_reportable_evidence, not_reportable_fer, trainer_finding, local_review_sources)
 TOOLS = [
     {"name":"read_procedure_section","description":"Read a governing procedure section or appendix from the supplied outline, with its complete table, conditions and continuation pages. Start at offset 0 and follow next_offset until null.",
      "input_schema":{"type":"object","properties":{"source_id":{"type":"string"},"section_id":{"type":"string"},"offset":{"type":"integer","minimum":0}},"required":["source_id","section_id","offset"],"additionalProperties":False}},
@@ -149,9 +149,11 @@ class ReviewEngine:
         governing=policies.candidates(checks,evidence.sources)
         sent=set()
         seeds=[]
+        selected_local_ids={s.id for check in checks for s in local_review_sources(evidence.sources,check[0])}
         catalog = [{"source_id": s.id, "document_id": s.document_id, "revision": s.revision,
-                    "reference_role": "optional_local_context" if s.document_id.startswith("LOCAL-") else "controlled_source",
-                    "kind": s.kind, "sections": len(s.chunks),
+                    "reference_role": ("selected_local_instruction" if s.id in selected_local_ids
+                                       else "optional_local_context") if s.document_id.startswith("LOCAL-") else "controlled_source",
+                    "review_check_ids": s.review_check_ids,                    "kind": s.kind, "sections": len(s.chunks),
                     "outline":index.outline(s.id) if s.kind=='record' else policies.outline(s.id),"name":s.name,
                     "start": registry.add([{'source_id':s.id,'chunk_id':s.chunks[0].id,
                                             'text':s.chunks[0].text[:600]}])[0]}
@@ -175,9 +177,10 @@ class ReviewEngine:
                 value,staged=registry.preview([row])
                 if not fits({**task,'initial_evidence':seeds+value},reserve=reserve):continue
                 registry=staged;seeds.extend(value);sent.add(key)
-        needed=[{'source_id':section.source_id,'chunk_id':c.id,'locator':c.locator,'text':c.text}
+        needed=index.anchor_pages(checks)
+        needed+=[{'source_id':section.source_id,'chunk_id':c.id,'locator':c.locator,'text':c.text}
                 for section in governing for c in section.chunks]
-        needed+=policies.definition_pages(checks,evidence.sources)+index.anchor_pages(checks)
+        needed+=policies.definition_pages(checks,evidence.sources)
         needed=list({(r['source_id'],r['chunk_id']):r for r in needed}.values())
         value,staged=registry.preview(needed)
         if fits({**task,'initial_evidence':value},reserve=12000):
@@ -359,9 +362,12 @@ class ReviewEngine:
                 if not_reportable and check[0] in FER_CHECK_IDS:
                     findings.append(not_reportable_fer(check[0], check[1], not_reportable))
                     continue
-                if check[0] in MANUAL_CHECK_IDS:
+                local_rules = local_review_sources(sources, check[0])
+                if check[0] in MANUAL_CHECK_IDS and not local_rules:
                     findings.append(trainer_finding(check))
                     continue
+                if local_rules:
+                    check = (check[0], check[1], [s.document_id for s in local_rules], check[0]=='manual_mdr_coding')
                 missing = [d for d in check[2] if d not in by_doc]
                 if check[3] and not has_mdr:
                     missing.append('matching MDR report')

@@ -4,7 +4,26 @@ def validate_availability(review, sources, sections, sent):
     by_id={s.id:s for s in sources}
     complete=[s for s in sections if all((s.source_id,c.id) in sent for c in s.chunks)]
     for i,finding in enumerate(review.findings):
-        text=finding.feedback+' '+finding.study_action
+        text=' '.join([finding.what_was_done, finding.feedback, finding.study_action])
+        if finding.check_id.startswith('mdr_'):
+            forms=[s for s in sections if s.kind=='mdr' and by_id[s.source_id].document_id=='MDR']
+            claims=re.finditer(
+                r'\b(?:MDR(?:\s+narrative)?(?:\s+field(?:\s+values|s)?)?|embedded MDR(?:\s+field values)?|field values)'
+                r'(?:\s+(?:B[1-7]|G7|H(?:1[12]?|2))(?:[–-](?:B[1-7]|H11))?(?:,|\s+and)?)*\s+'
+                r'(?:(?:was|were|is|are)\s+)?not\s+(?:supplied|provided|available)(?:\s+for review)?', text,re.I)
+            for claim in claims:
+                version=re.search(r'\b(initial|follow[- ]?up)\s+$',text[:claim.start()],re.I)
+                relevant=forms
+                if version:
+                    role=version[1].lower().replace(' ','-').replace('followup','follow-up')
+                    relevant=[s for s in forms if role in by_id[s.source_id].name.lower()]
+                if not relevant or not all(s in complete for s in relevant):
+                    continue
+                raise ContractError('supplied_mdr_claimed_missing',
+                    'Linked MDR form text, including continuation pages, was supplied completely. Re-read the form and cite its readable values. '
+                    'Name any specific blank, unreadable or ambiguous field and the affected version; do not claim the MDR values were not supplied. '
+                    'Missing completion guidance is distinct from missing record evidence. Do not infer a favorable assessment or checkbox values.',
+                    f'findings.{i}')
         for section in complete:
             source=by_id[section.source_id]
             appendix=re.match(r'^Appendix ([A-Z])\b',section.title,re.I)

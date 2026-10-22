@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-VERSION = "0.8.0"
+VERSION = "0.8.1"
 ENVIRONMENT = 'production'
 PROVIDER = 'openai_responses'
 ENDPOINT = 'https://api.gpt.medtronic.com/providers/openai/v1/responses'
@@ -97,10 +97,14 @@ REVIEW_AREAS = [('narrative', 'Event Summary', ['027-WI185'], False),
  ('manual_related_investigation', 'Existing or related investigation reference', None, False),
  ('manual_technical_assessment', 'Technical Assessment/Review', None, False),
  ('manual_no_investigation_rationale', 'Rationale for no formal investigation', None, False),
- ('investigation_summary', 'Investigation Summary', ['027-WI186'], False),
+ ('investigation_summary', 'Investigation Summary', None, False),
  ('gfe', 'Good Faith Effort', ['027-WI188', '027-WI185'], False),
  ('customer_response', 'Customer response', ['027-WI188'], False)]
 MANUAL_CHECK_IDS = {row[0] for row in REVIEW_AREAS if row[2] is None}
+INVESTIGATION_CHECK_IDS = {'manual_investigation_determination', 'manual_related_investigation',
+                           'manual_technical_assessment', 'manual_no_investigation_rationale',
+                           'investigation_summary'}
+LOCAL_REVIEW_CHECK_IDS = MANUAL_CHECK_IDS - INVESTIGATION_CHECK_IDS
 REVIEW_LABELS = {row[0]: row[1] for row in REVIEW_AREAS}
 GROUPS = [{"name": f"Review areas {start+1}–{min(start+5, len(REVIEW_AREAS))}",
            "checks": [(key, label, docs or [], mdr) for key, label, docs, mdr in REVIEW_AREAS[start:start+5]]}

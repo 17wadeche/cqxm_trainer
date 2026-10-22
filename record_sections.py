@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from datetime import date
 import re
 from models import EvidenceSource, extracted_digest
+from config import LOCAL_REVIEW_CHECK_IDS, REVIEW_LABELS
 HEADINGS = {
     'event': 'Event Summary', 'product': 'Product Line Item Summary',
     'analysis': 'Analysis Summary', 'investigation': 'Investigation Summary',
@@ -69,6 +70,14 @@ for key in ['mdr_narratives','mdr_patient_device','mdr_initial_reporter',
             'mdr_event_dates','mdr_patient_severity']:
     ROUTES[key] = ['mdr','event','product','regulatory','reportability']
     ANCHORS[key] = [r'MEDWATCH', r'Mfr Report #']
+MDR_CHECK_IDS = {'mdr_narratives', 'mdr_patient_device', 'mdr_initial_reporter',
+                 'mdr_event_dates', 'mdr_patient_severity'}
+for key in LOCAL_REVIEW_CHECK_IDS:
+    ROUTES[key] = ['product', 'analysis', 'event', 'communications', 'tasks']
+    ANCHORS[key] = [r'\b'+re.escape(REVIEW_LABELS[key])+r'\b']
+MDR_CHECK_IDS.add('manual_mdr_coding')
+ROUTES['manual_mdr_coding'] = ['mdr', 'event', 'product', 'regulatory', 'reportability']
+ANCHORS['manual_mdr_coding'] = [r'MEDWATCH', r'Mfr Report #', r'\bH6\b']
 @dataclass
 class Section:
     id: str
@@ -83,7 +92,8 @@ class Section:
 def page_groups(source):
     pages={}
     for chunk in source.chunks:
-        key=re.sub(r', part \d+$','',chunk.locator)
+        page=re.match(r'^PDF page \d+\b',chunk.locator)
+        key=page[0] if page else re.sub(r', part \d+$','',chunk.locator)
         pages.setdefault(key,[]).append(chunk)
     return list(pages.values())
 class RecordIndex:
@@ -118,13 +128,20 @@ class RecordIndex:
         patterns=[p for check in checks for p in ANCHORS.get(check[0],[])]
         derived={(s.file_sha256,c.id) for s in self.sources if s.document_id=='MDR' for c in s.chunks}
         rows=[]
+        mdr_checks = any(check[0] in MDR_CHECK_IDS for check in checks)
+        mdr_chunks = {(section.source_id,c.id) for section in self.sections
+                      if section.kind == 'mdr' for c in section.chunks}
         for source in self.sources:
             for page in page_groups(source):
                 text='\n'.join(c.text for c in page)
-                if not any(re.search(p,text,re.I) for p in patterns):continue
+                if not ((mdr_checks and any((source.id,c.id) in mdr_chunks for c in page))
+                        or any(re.search(p,text,re.I) for p in patterns)):continue
                 for c in page:
                     if source.document_id=='DER' and (source.file_sha256,c.id) in derived:continue
                     rows.append({'source_id':source.id,'chunk_id':c.id,'locator':c.locator,'text':c.text})
+        if mdr_checks:
+            form_ids={s.id for s in self.sources if s.document_id=='MDR'}
+            rows.sort(key=lambda row: 0 if row['source_id'] in form_ids else 1)
         return rows
     def calendar_comparisons(self,sent):
         results=[]

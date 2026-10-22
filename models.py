@@ -41,6 +41,7 @@ class EvidenceSource(StrictModel):
     file_sha256: str | None
     extracted_text_sha256: str
     chunks: list[Chunk] = Field(min_length=1)
+    review_check_ids: list[str] = Field(default_factory=list)
 class EvidenceManifest(StrictModel):
     mode: Literal["demo", "review"]
     review_id: str = Field(min_length=1)
@@ -92,20 +93,21 @@ def validate_traceability(review: Review, evidence: EvidenceManifest) -> None:
         if chunk is None or _norm(ref.quote) not in _norm(chunk.text):
             raise ValueError(f"Unverified excerpt: {ref.source_id}/{ref.chunk_id}")
     from config import MANUAL_CHECK_IDS
-    from review_rules import NOT_REPORTABLE_EXCLUSIONS, FER_CHECK_IDS, not_reportable_evidence, not_reportable_fer
+    from review_rules import NOT_REPORTABLE_EXCLUSIONS, FER_CHECK_IDS, not_reportable_evidence, not_reportable_fer, local_review_sources
     not_reportable = not_reportable_evidence(evidence.sources)
     if not_reportable:
         from record_sections import without_mdr_sources
         allowed_record_chunks={(s.id,c.id) for s in without_mdr_sources(evidence.sources)
                                if s.kind=='record' for c in s.chunks}
     for finding in review.findings:
+        local_rules = local_review_sources(evidence.sources, finding.check_id)
         if not_reportable:
             if finding.check_id in NOT_REPORTABLE_EXCLUSIONS:
                 raise ValueError('Not Reportable reviews must omit excluded checks')
             if any((ref.source_id,ref.chunk_id) not in allowed_record_chunks for ref in finding.record_evidence):
                 raise ValueError('Not Reportable reviews must not compare MDR form evidence')
-        if finding.check_id in MANUAL_CHECK_IDS or finding.assessment == 'manual_review_needed':
-            if (finding.check_id not in MANUAL_CHECK_IDS or finding.assessment != 'manual_review_needed'
+        if (finding.check_id in MANUAL_CHECK_IDS and not local_rules) or finding.assessment == 'manual_review_needed':
+            if (finding.check_id not in MANUAL_CHECK_IDS or local_rules or finding.assessment != 'manual_review_needed'
                 or (finding.what_was_done, finding.feedback) not in {
                     ('Trainer Review', 'Trainer Review'), ('Manual Review Needed', 'Manual Review Needed')}                or finding.record_evidence or finding.procedure_references
                 or finding.priority != 'none' or finding.study_action):
@@ -121,9 +123,11 @@ def validate_traceability(review: Review, evidence: EvidenceManifest) -> None:
                 raise ValueError('Not Reportable FER rows must follow the automatic training rule')
             continue
         if finding.assessment != "not_assessable":
-            if not finding.record_evidence or not finding.procedure_references or all(sources[r.source_id].document_id.startswith('LOCAL-') for r in finding.procedure_references):
+            if (not finding.record_evidence or not finding.procedure_references
+                or (local_rules and not any(r.source_id in {s.id for s in local_rules} for r in finding.procedure_references))
+                or (not local_rules and all(sources[r.source_id].document_id.startswith('LOCAL-') for r in finding.procedure_references))):
                 raise ValueError(f"{finding.check_id}: assessment requires record and rule evidence")
-            if finding.check_id.startswith('mdr_') and not any(sources[r.source_id].document_id=='MDR' for r in finding.record_evidence):
+            if (finding.check_id.startswith('mdr_') or finding.check_id=='manual_mdr_coding') and not any(sources[r.source_id].document_id=='MDR' for r in finding.record_evidence):
                 raise ValueError('MDR field assessment requires matching MDR evidence')
             if finding.check_id=='consistency':
                 cited={sources[r.source_id].document_id for r in finding.record_evidence}

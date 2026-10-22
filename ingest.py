@@ -40,6 +40,25 @@ def _docx_blocks(parent, prefix="Body"):
                         continue
                     visited.add(cell._tc)
                     yield from _docx_blocks(cell, f"{prefix}, table {index}, row {rnum}, cell {cnum}")
+def _page_form_fields(page):
+    for reference in page.get('/Annots') or []:
+        widget = reference.get_object()
+        if widget.get('/Subtype') != '/Widget':
+            continue
+        field, names, value, label, seen = widget, [], None, None, set()
+        while field is not None and id(field) not in seen:
+            seen.add(id(field))
+            if field.get('/T') is not None:
+                names.insert(0, str(field['/T']))
+            if value is None and field.get('/V') is not None:
+                value = field['/V']
+            if label is None and field.get('/TU'):
+                label = str(field['/TU'])
+            parent = field.get('/Parent')
+            field = parent.get_object() if parent is not None else None
+        if names:
+            name = '.'.join(names)
+            yield name, f"{label or name}: {value if value is not None else '[no value]'}"
 def extract(name, data, *, depth=0):
     if not data or len(data) > MAX_FILE_BYTES:
         raise ValueError("Choose a nonempty file smaller than 20 MB.")
@@ -53,6 +72,7 @@ def extract(name, data, *, depth=0):
             raise ValueError("Export an unencrypted copy before uploading this PDF.")
         if len(reader.pages) > 600:
             raise ValueError("This PDF exceeds the 600-page limit. Upload the relevant document separately.")
+        located_fields = set()
         for number, page in enumerate(reader.pages, 1):
             if page.get('/Contents') is None:
                 text = ''
@@ -66,9 +86,13 @@ def extract(name, data, *, depth=0):
                 warnings.append(f"{name}: page {number} has little or no readable text; scanned content needs OCR or manual review.")
             if text.strip():
                 blocks.append((f"PDF page {number}", text))
+            for field_name, field_text in _page_form_fields(page):
+                located_fields.add(field_name)
+                blocks.append((f"PDF page {number}, form field {field_name}", field_text))
         fields = reader.get_fields() or {}
         for field_name, info in fields.items():
-            blocks.append((f"PDF form field {field_name}", f"{field_name}: {info.get('/V', '[no value]')}"))
+            if field_name not in located_fields:
+                blocks.append((f"PDF form field {field_name}", f"{field_name}: {info.get('/V', '[no value]')}"))
         warnings.append(f"{name}: PDF text extraction does not establish the meaning of diagrams or flattened checkbox marks. Inspect form and visual evidence when relevant.")
     elif ext == ".docx":
         try:

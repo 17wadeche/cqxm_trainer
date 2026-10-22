@@ -1,5 +1,11 @@
 import re
 from models import Citation, Finding
+from config import LOCAL_REVIEW_CHECK_IDS
+def local_review_sources(sources, check_id):
+    if check_id not in LOCAL_REVIEW_CHECK_IDS:
+        return []
+    return [s for s in sources if s.kind == 'procedure' and s.document_id.startswith('LOCAL-')
+        and s.approved_revision and s.revision and check_id in s.review_check_ids]
 NOT_REPORTABLE_EXCLUSIONS = {
     'manual_fdm', 'manual_fdr', 'manual_fdc', 'manual_img',
     'mdr_narratives', 'mdr_patient_device', 'mdr_initial_reporter',

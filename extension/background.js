@@ -466,7 +466,7 @@ chrome.runtime.onMessage.addListener((message,sender,sendResponse)=>{
     if(message.type==='OPEN_SETUP'){await chrome.runtime.openOptionsPage();return{};}
     if(message.type==='ADMIN'){
       if(sender.url!==chrome.runtime.getURL('options.html'))throw new Error('Open training setup to change these settings.');
-      if(!['status','settings','procedure','local_procedure','remove_local_procedure','clear_token'].includes(message.method))throw new Error('Unsupported setting.');
+      if(!['status','settings','procedure','local_procedure','local_review_scope','remove_local_procedure','clear_token'].includes(message.method))throw new Error('Unsupported setting.');
       return native(message.method,message.data||{});
     }
     const tab=await tabFor(sender);

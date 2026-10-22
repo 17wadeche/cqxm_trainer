@@ -74,6 +74,7 @@ class Repository:
             origins=dict(self.db.execute('SELECT source_id,origin FROM source_origins').fetchall())
         return [{"id": s.id, "document_id": s.document_id, "name": s.name,
                  "revision": s.revision, "chunks": len(s.chunks), "warnings": w,
+                 "review_check_ids": s.review_check_ids,
                  "origin": origins.get(s.id,'uploaded')}
                 for s, w in self.active_procedures()]
     def remove(self, source_id):
