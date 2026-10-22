@@ -18,14 +18,16 @@ FOCUS = {
 }
 for key, base in {
     'initial_reporter':'narrative','country':'narrative',
-    'notified_aware_date':'timing','event_date':'narrative',
+    'notified_date':'narrative','aware_date':'timing','event_date':'narrative',
     'complaint_notified_date':'narrative','complaint_status':'closure',
     'product_return_status':'gfe','no_return_rationale':'gfe','rfr':'identifiers',
     'brief_description':'narrative','therapy':'identifiers',
     'investigation_summary':'investigation','customer_response':'gfe',
 }.items():
     FOCUS[key] = FOCUS[base]
-FOCUS['notified_aware_date'] = {**FOCUS['timing'], '027-WI185': EVENT_DETAILS}
+for key in ['notified_date', 'aware_date']:
+    FOCUS[key] = {'027-WI185': EVENT_DETAILS,
+                  '054-P044': [r'^Appendix [A-Z].*Aware Date vs']}
 for key, docid in [('brazil_reporting','D00780668'), ('china_reporting','054-WI204'),
                    ('japan_reporting','D00780698'), ('korea_reporting','D00780699')]:
     FOCUS[key] = {docid: [r'.*'], '054-P044': [r'.*']}
@@ -85,6 +87,8 @@ class ProcedureIndex:
         check_ids={c[0] for c in checks}
         terms=[]
         if check_ids & {'timing','reportability','consultation'}:terms+=['Aware Date','Serious Injury','Working Day']
+        if 'aware_date' in check_ids:terms+=['Aware Date']
+        if 'notified_date' in check_ids:terms+=['Notified Date','Notify Date']
         if check_ids & {'intake','investigation','cause'}:terms+=['Complaint','Reasonably Known']
         selected=[]
         docs={d for check in checks for d in check[2]}

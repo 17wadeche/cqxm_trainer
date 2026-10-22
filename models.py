@@ -92,9 +92,18 @@ def validate_traceability(review: Review, evidence: EvidenceManifest) -> None:
         if chunk is None or _norm(ref.quote) not in _norm(chunk.text):
             raise ValueError(f"Unverified excerpt: {ref.source_id}/{ref.chunk_id}")
     from config import MANUAL_CHECK_IDS
-    from review_rules import FER_CHECK_IDS, not_reportable_evidence, not_reportable_fer
+    from review_rules import NOT_REPORTABLE_EXCLUSIONS, FER_CHECK_IDS, not_reportable_evidence, not_reportable_fer
     not_reportable = not_reportable_evidence(evidence.sources)
+    if not_reportable:
+        from record_sections import without_mdr_sources
+        allowed_record_chunks={(s.id,c.id) for s in without_mdr_sources(evidence.sources)
+                               if s.kind=='record' for c in s.chunks}
     for finding in review.findings:
+        if not_reportable:
+            if finding.check_id in NOT_REPORTABLE_EXCLUSIONS:
+                raise ValueError('Not Reportable reviews must omit excluded checks')
+            if any((ref.source_id,ref.chunk_id) not in allowed_record_chunks for ref in finding.record_evidence):
+                raise ValueError('Not Reportable reviews must not compare MDR form evidence')
         if finding.check_id in MANUAL_CHECK_IDS or finding.assessment == 'manual_review_needed':
             if (finding.check_id not in MANUAL_CHECK_IDS or finding.assessment != 'manual_review_needed'
                 or (finding.what_was_done, finding.feedback) not in {

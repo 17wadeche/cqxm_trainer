@@ -38,7 +38,8 @@ ANCHORS = {
 FIELD_ROUTES = {
     'initial_reporter': ('intake', [r'Initial Reporter', r'Reporter (?:Name|Type|Information)']),
     'country': ('intake', [r'Country']),
-    'notified_aware_date': ('timing', [r'Notified Date', r'Aware Date']),
+    'notified_date': ('intake', [r'(?<!Handling )\bNotified Date\b']),
+    'aware_date': ('timing', [r'\bAware Date\b']),
     'event_date': ('intake', [r'Event Date', r'Date of Event']),
     'complaint_notified_date': ('intake', [r'Complaint Handling Notified', r'Complaint.*Notif']),
     'complaint_status': ('closure', [r'Event Status', r'Complaint Status']),
@@ -151,6 +152,20 @@ class RecordIndex:
         chunks=section.chunks[offset:offset+limit]
         return [{'source_id':source_id,'chunk_id':c.id,'locator':c.locator,'text':c.text} for c in chunks], {
             'section_id':section_id,'offset':offset,'next_offset':offset+len(chunks) if offset+len(chunks)<len(section.chunks) else None}
+def without_mdr_sources(sources):
+    excluded={(section.source_id,c.id) for section in RecordIndex(sources).sections
+              if section.kind=='mdr' for c in section.chunks}
+    result=[]
+    for source in sources:
+        if source.kind!='record':
+            result.append(source)
+            continue
+        if source.document_id=='MDR':continue
+        chunks=[c for c in source.chunks if (source.id,c.id) not in excluded]
+        if not chunks:continue
+        result.append(source if len(chunks)==len(source.chunks) else source.model_copy(
+            update={'chunks':chunks,'extracted_text_sha256':extracted_digest(chunks)}))
+    return result
 def embedded_mdrs(source):
     if source.document_id!='DER':return [],[]
     sections=RecordIndex([source]).sections

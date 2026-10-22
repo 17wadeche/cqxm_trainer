@@ -6,6 +6,8 @@ import re
 from docx.shared import Pt, RGBColor
 from models import Review, EvidenceManifest, validate_traceability
 from word_styles import document, table, body
+from record_sections import without_mdr_sources
+from review_rules import not_reportable_evidence
 LABELS = {
     "manual_review_needed": "Trainer Review",
     "done_properly": "Done properly", "needs_trainer_review": "Trainer Review",
@@ -84,15 +86,16 @@ def render(review: Review, evidence: EvidenceManifest, output: Path, *, detailed
     sources={s.id:s for s in evidence.sources}
     procedures='; '.join(dict.fromkeys(s.document_id+' Rev '+str(s.revision) for s in evidence.sources if s.kind=='procedure'))
     incoming=[s for s in evidence.sources if s.document_id=='ATTACHMENT']
-    record_types=', '.join(dict.fromkeys(s.document_id for s in evidence.sources if s.kind=='record' and s.document_id!='ATTACHMENT')) or 'No event report'
+    not_reportable=bool(not_reportable_evidence(evidence.sources))
+    reviewed_sources=without_mdr_sources(evidence.sources) if not_reportable else evidence.sources
+    record_types=', '.join(dict.fromkeys(s.document_id for s in reviewed_sources if s.kind=='record' and s.document_id!='ATTACHMENT')) or 'No event report'
     scope=f'Sources: {record_types} and {len(incoming)} readable incoming attachment(s). A missing export field does not prove the work was missed.'
     if not incoming:
         scope+=' The original rep or patient information could not be compared.'
     attachment_limits=[v for v in evidence.limitations if 'attachment' in v.lower() and not v.startswith('No readable incoming')]
     if attachment_limits:
         scope+=' Incoming information is incomplete: '+' '.join(dict.fromkeys(attachment_limits))
-    from review_rules import not_reportable_evidence
-    if not_reportable_evidence(evidence.sources):
+    if not_reportable:
         scope+=' The event is Not Reportable. MDR fields and FDM/FDR/FDC/IMG are excluded; FER rows are automatically marked Done properly.'
     elif not any(s.document_id=='MDR' and s.kind=='record' for s in evidence.sources):
         scope+=' A matching MDR was not supplied.'
@@ -114,7 +117,8 @@ def render_detailed(review: Review, evidence: EvidenceManifest, output: Path) ->
     body(doc, review.overall_summary)
     doc.add_heading("Records and procedures reviewed", 1)
     rows = []
-    for source in evidence.sources:
+    reviewed_sources=without_mdr_sources(evidence.sources) if not_reportable_evidence(evidence.sources) else evidence.sources
+    for source in reviewed_sources:
         rows.append([source.document_id, source.name, source.revision or "Not applicable"])
     table(doc, ["Source", "Document", "Revision"], rows, [.95, 5.10, 1.15])
     body(doc, "Procedure selection: " + evidence.policy_selection)

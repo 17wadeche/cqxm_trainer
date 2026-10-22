@@ -9,7 +9,7 @@ from ingest import source_from_bytes
 from mdt import MDTClient, ProviderError, response_text
 from models import EvidenceManifest, Review, Finding, validate_traceability
 from review_contract import EvidenceCatalog, validation_issues
-from record_sections import RecordIndex, embedded_mdrs
+from record_sections import RecordIndex, embedded_mdrs, without_mdr_sources
 from procedure_sections import ProcedureIndex, coverage
 from evidence_quality import validate_availability
 from context_budget import estimate_tokens
@@ -87,6 +87,10 @@ class ReviewEngine:
                 limit = min(limit*2, MAX_OUTPUT_TOKENS)
                 length_retries += 1
                 progress(f'The answer was cut short. Retrying {phase} with more room…')
+    def _search(self, query, sources, limit):
+        allowed={(s.id,c.id) for s in sources for c in s.chunks}
+        return [row for row in self.repo.search(query, [s.id for s in sources], limit)
+                if (row['source_id'],row['chunk_id']) in allowed]
     def _tools(self, name, args, sources):
         allowed = {s.id: s for s in sources}
         if not isinstance(args, dict):
@@ -108,7 +112,7 @@ class ReviewEngine:
             if set(args) != {"query"} or not isinstance(args['query'], str):
                 raise ValueError("Provide a single query string")
             kind = "record" if name == "search_records" else "procedure"
-            return self.repo.search(args['query'][:500], [s.id for s in sources if s.kind == kind], 4)
+            return self._search(args['query'][:500], [s for s in sources if s.kind == kind], 4)
         if name == "read_section":
             if set(args) != {"source_id", "chunk_id"}:
                 raise ValueError("Provide source_id and chunk_id")
@@ -129,6 +133,12 @@ class ReviewEngine:
     def _group(self, client, checks, evidence, progress, cancelled, budget=None, prior_findings=None, input_target=TARGET_INPUT_TOKENS):
         if budget is None:
             budget = {'remaining': MAX_REVIEW_REQUESTS}
+        not_reportable = bool(not_reportable_evidence(evidence.sources))
+        excluded = NOT_REPORTABLE_EXCLUSIONS if not_reportable else set()
+        if any(c[0] in excluded for c in checks):
+            raise ValueError('Not Reportable records cannot review excluded fields')
+        if not_reportable:
+            evidence = evidence.model_copy(update={'sources':without_mdr_sources(evidence.sources)})
         proc_ids = list(dict.fromkeys(d for c in checks for d in c[2]))
         record_ids = [s.id for s in evidence.sources if s.kind == 'record']
         procedure_ids = [s.id for s in evidence.sources if (s.document_id in proc_ids or s.document_id.startswith('LOCAL-')) and s.kind == 'procedure']
@@ -147,6 +157,8 @@ class ReviewEngine:
                                             'text':s.chunks[0].text[:600]}])[0]}
                    for s in evidence.sources]
         task = {"record_id": evidence.record_id, "stage": evidence.record_stage,
+                "recorded_reportability": "Not Reportable" if not_reportable else "Not established as Not Reportable",
+                "excluded_check_ids": sorted(excluded),
                 "policy_selection": evidence.policy_selection,
                 "expected_checks": [{"id": c[0], "focus": c[1], "required_documents": c[2]} for c in checks],
                 "input_limitations": evidence.limitations, "sources": catalog, "initial_evidence": seeds,
@@ -193,7 +205,8 @@ class ReviewEngine:
                 'status':'complete' if supplied==len(section.chunks) else 'partial or not yet supplied'})
         if len(checks)>2 and any(s['status']!='complete' for s in task['section_coverage']):
             raise SplitEvidencePacket()
-        hits=self.repo.search(query,record_ids,4)+self.repo.search(query,procedure_ids,6)
+        hits=self._search(query,[s for s in evidence.sources if s.id in record_ids],4)
+        hits+=self._search(query,[s for s in evidence.sources if s.id in procedure_ids],6)
         expanded=[]
         for hit in hits:expanded.extend(self._tools('read_section',{'source_id':hit['source_id'],'chunk_id':hit['chunk_id']},evidence.sources))
         for row in expanded:
